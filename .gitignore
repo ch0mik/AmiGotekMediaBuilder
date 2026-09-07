@@ -1,0 +1,65 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+
+# Visual Studio / VS Code / JetBrains Rider
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.csproj.user
+*.DotSettings.user
+
+# NuGet and package artifacts
+packages/
+*.nupkg
+*.snupkg
+project.assets.json
+project.nuget.cache
+*.nuget.g.props
+*.nuget.g.targets
+
+# Test and coverage output
+TestResults/
+test-results/
+*.trx
+coverage/
+coverage*.xml
+coverage*.json
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Local secrets and developer environment files
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.Development.json
+
+# Generated library data when a sample library is created in the repository
+/assets/
+/catalog/
+/work/
+/output/
+/unknown/
+/review/
+/reports/
+/logs/
+/config/*.toml
+/demoscene/downloads/
+/demoscene/metadata/
+/demoscene/cache/
+
+# Local scratch and publish archives
+/.scratch/
+*.publish.zip
+*.publish.tar.gz
