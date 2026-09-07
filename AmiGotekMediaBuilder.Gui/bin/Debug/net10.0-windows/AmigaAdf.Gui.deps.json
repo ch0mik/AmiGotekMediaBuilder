@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "AmigaAdf.Gui/1.0.0": {
+        "dependencies": {
+          "AmigaAdf.Core": "1.0.0"
+        },
+        "runtime": {
+          "AmigaAdf.Gui.dll": {}
+        }
+      },
+      "AmigaAdf.Core/1.0.0": {
+        "runtime": {
+          "AmigaAdf.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "AmigaAdf.Gui/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "AmigaAdf.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

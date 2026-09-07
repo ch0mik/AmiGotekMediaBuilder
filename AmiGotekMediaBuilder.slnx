@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="AmiGotekMediaBuilder.Cli/AmiGotekMediaBuilder.Cli.csproj" />
+  <Project Path="AmiGotekMediaBuilder.Core.Tests/AmiGotekMediaBuilder.Core.Tests.csproj" />
+  <Project Path="AmiGotekMediaBuilder.Core/AmiGotekMediaBuilder.Core.csproj" />
+  <Project Path="AmiGotekMediaBuilder.Demoscene/AmiGotekMediaBuilder.Demoscene.csproj" />
+  <Project Path="AmiGotekMediaBuilder.Demoscene.Cli/AmiGotekMediaBuilder.Demoscene.Cli.csproj" />
+  <Project Path="AmiGotekMediaBuilder.Demoscene.Gui/AmiGotekMediaBuilder.Demoscene.Gui.csproj" />
+  <Project Path="AmiGotekMediaBuilder.Gui/AmiGotekMediaBuilder.Gui.csproj" />
+</Solution>

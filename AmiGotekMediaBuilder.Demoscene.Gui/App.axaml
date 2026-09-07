@@ -1,0 +1,68 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AmiGotekMediaBuilder.Demoscene.Gui.App"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{DynamicResource MatrixWindowBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource MatrixTextBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource MatrixFontFamily}" />
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+    <Style Selector="TextBlock">
+      <Setter Property="FontFamily" Value="{DynamicResource MatrixFontFamily}" />
+      <Setter Property="Foreground" Value="{DynamicResource MatrixTextBrush}" />
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="Background" Value="{DynamicResource MatrixPrimaryBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource MatrixTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MatrixBorderBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource MatrixFontFamily}" />
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Padding" Value="12,6" />
+    </Style>
+    <Style Selector="Button:pointerover">
+      <Setter Property="Background" Value="{DynamicResource MatrixPrimaryHoverBrush}" />
+    </Style>
+    <Style Selector="TextBox, ComboBox">
+      <Setter Property="Background" Value="{DynamicResource MatrixSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MatrixBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource MatrixTextBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource MatrixFontFamily}" />
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="MinHeight" Value="36" />
+    </Style>
+    <Style Selector="CheckBox">
+      <Setter Property="Foreground" Value="{DynamicResource MatrixTextBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource MatrixFontFamily}" />
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+    <Style Selector="ListBox">
+      <Setter Property="Background" Value="{DynamicResource MatrixSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MatrixBorderBrush}" />
+    </Style>
+    <Style Selector="ListBoxItem">
+      <Setter Property="Padding" Value="6" />
+      <Setter Property="FontFamily" Value="{DynamicResource MatrixFontFamily}" />
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+    <Style Selector="ListBoxItem:selected">
+      <Setter Property="Background" Value="{DynamicResource MatrixAccentBrush}" />
+    </Style>
+  </Application.Styles>
+  <Application.Resources>
+    <FontFamily x:Key="MatrixFontFamily">avares://AmiGotekMediaBuilder.Demoscene.Gui/Assets/Fonts/MatrixTypeDisplay-Regular.ttf#MatrixType Display</FontFamily>
+    <SolidColorBrush x:Key="MatrixWindowBrush" Color="#020B06" />
+    <SolidColorBrush x:Key="MatrixSurfaceBrush" Color="#061A10" />
+    <SolidColorBrush x:Key="MatrixSurfaceAltBrush" Color="#0B2416" />
+    <SolidColorBrush x:Key="MatrixPrimaryBrush" Color="#0C6B37" />
+    <SolidColorBrush x:Key="MatrixPrimaryHoverBrush" Color="#15934B" />
+    <SolidColorBrush x:Key="MatrixAccentBrush" Color="#12602F" />
+    <SolidColorBrush x:Key="MatrixBorderBrush" Color="#1BAA58" />
+    <SolidColorBrush x:Key="MatrixTextBrush" Color="#C9FFD3" />
+    <SolidColorBrush x:Key="MatrixMutedBrush" Color="#76BE8A" />
+  </Application.Resources>
+</Application>

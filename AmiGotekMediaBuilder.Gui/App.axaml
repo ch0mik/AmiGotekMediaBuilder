@@ -1,0 +1,70 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AmiGotekMediaBuilder.Gui.App"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{DynamicResource HolWindowBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource HolTextBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource HolFontFamily}" />
+      <Setter Property="FontSize" Value="15" />
+    </Style>
+    <Style Selector="TextBlock">
+      <Setter Property="FontFamily" Value="{DynamicResource HolFontFamily}" />
+      <Setter Property="Foreground" Value="{DynamicResource HolTextBrush}" />
+      <Setter Property="FontSize" Value="15" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="Background" Value="{DynamicResource HolPrimaryBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource HolTextOnPrimaryBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource HolBorderBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource HolFontFamily}" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Padding" Value="12,6" />
+    </Style>
+    <Style Selector="Button:pointerover">
+      <Setter Property="Background" Value="{DynamicResource HolPrimaryHoverBrush}" />
+    </Style>
+    <Style Selector="TextBox, ComboBox">
+      <Setter Property="Background" Value="{DynamicResource HolSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource HolBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource HolTextBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource HolFontFamily}" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="MinHeight" Value="36" />
+    </Style>
+    <Style Selector="CheckBox">
+      <Setter Property="Foreground" Value="{DynamicResource HolTextBrush}" />
+      <Setter Property="FontFamily" Value="{DynamicResource HolFontFamily}" />
+      <Setter Property="FontSize" Value="15" />
+    </Style>
+    <Style Selector="ListBox">
+      <Setter Property="Background" Value="{DynamicResource HolSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource HolBorderBrush}" />
+    </Style>
+    <Style Selector="ListBoxItem">
+      <Setter Property="Padding" Value="6" />
+      <Setter Property="FontFamily" Value="{DynamicResource HolFontFamily}" />
+      <Setter Property="FontSize" Value="15" />
+    </Style>
+    <Style Selector="ListBoxItem:selected">
+      <Setter Property="Background" Value="{DynamicResource HolAccentBrush}" />
+    </Style>
+  </Application.Styles>
+  <Application.Resources>
+    <!-- Hall of Light-inspired dark navy/blue motif; values are local theme roles. -->
+    <FontFamily x:Key="HolFontFamily">avares://AmiGotekMediaBuilder.Gui/Assets/Fonts/Zerove-Regular.ttf#Zerove</FontFamily>
+    <SolidColorBrush x:Key="HolWindowBrush" Color="#08111D" />
+    <SolidColorBrush x:Key="HolSurfaceBrush" Color="#101D2D" />
+    <SolidColorBrush x:Key="HolHeaderBrush" Color="#02070D" />
+    <SolidColorBrush x:Key="HolPrimaryBrush" Color="#1B4779" />
+    <SolidColorBrush x:Key="HolPrimaryHoverBrush" Color="#2A619E" />
+    <SolidColorBrush x:Key="HolAccentBrush" Color="#386AA0" />
+    <SolidColorBrush x:Key="HolBorderBrush" Color="#5186C3" />
+    <SolidColorBrush x:Key="HolTextBrush" Color="#D9EBFF" />
+    <SolidColorBrush x:Key="HolTextOnPrimaryBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="HolMutedTextBrush" Color="#8DB5E1" />
+  </Application.Resources>
+</Application>

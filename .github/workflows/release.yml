@@ -1,0 +1,121 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  TAG_NAME: ${{ github.event.release.tag_name || github.ref_name }}
+  AVALONIA_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.rid }}
+    if: startsWith(github.ref_name, 'v') || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Keep the list explicit: these are the supported desktop RID/architecture pairs.
+      matrix:
+        rid:
+          - win-x64
+          - win-arm64
+          - linux-x64
+          - linux-arm64
+          - osx-x64
+          - osx-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore CLI and GUI for RID
+        run: |
+          dotnet restore AmiGotekMediaBuilder.Cli/AmiGotekMediaBuilder.Cli.csproj --runtime ${{ matrix.rid }}
+          dotnet restore AmiGotekMediaBuilder.Gui/AmiGotekMediaBuilder.Gui.csproj --runtime ${{ matrix.rid }}
+          dotnet restore AmiGotekMediaBuilder.Demoscene.Cli/AmiGotekMediaBuilder.Demoscene.Cli.csproj --runtime ${{ matrix.rid }}
+          dotnet restore AmiGotekMediaBuilder.Demoscene.Gui/AmiGotekMediaBuilder.Demoscene.Gui.csproj --runtime ${{ matrix.rid }}
+
+      - name: Publish CLI
+        run: >-
+          dotnet publish AmiGotekMediaBuilder.Cli/AmiGotekMediaBuilder.Cli.csproj
+          --configuration Release --runtime ${{ matrix.rid }} --self-contained true
+          --no-restore --output publish/cli
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false
+
+      - name: Publish GUI
+        run: >-
+          dotnet publish AmiGotekMediaBuilder.Gui/AmiGotekMediaBuilder.Gui.csproj
+          --configuration Release --runtime ${{ matrix.rid }} --self-contained true
+          --no-restore --output publish/gui
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false
+
+      - name: Publish Demoscene CLI
+        run: >-
+          dotnet publish AmiGotekMediaBuilder.Demoscene.Cli/AmiGotekMediaBuilder.Demoscene.Cli.csproj
+          --configuration Release --runtime ${{ matrix.rid }} --self-contained true
+          --no-restore --output publish/demoscene-cli
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false
+
+      - name: Publish Demoscene GUI
+        run: >-
+          dotnet publish AmiGotekMediaBuilder.Demoscene.Gui/AmiGotekMediaBuilder.Demoscene.Gui.csproj
+          --configuration Release --runtime ${{ matrix.rid }} --self-contained true
+          --no-restore --output publish/demoscene-gui
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false
+
+      - name: Package assets
+        run: |
+          mkdir -p dist
+          zip -j "dist/ami-gotek-media-builder-cli-${TAG_NAME}-${{ matrix.rid }}.zip" publish/cli/*
+          zip -j "dist/ami-gotek-media-builder-gui-${TAG_NAME}-${{ matrix.rid }}.zip" publish/gui/*
+          zip -j "dist/ami-gotek-media-builder-demoscene-cli-${TAG_NAME}-${{ matrix.rid }}.zip" publish/demoscene-cli/*
+          zip -j "dist/ami-gotek-media-builder-demoscene-gui-${TAG_NAME}-${{ matrix.rid }}.zip" publish/demoscene-gui/*
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rid }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Attach assets to GitHub release
+    needs: publish
+    if: startsWith(github.ref_name, 'v') || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" --title "$TAG_NAME" --generate-notes
+          fi
+          gh release upload "$TAG_NAME" dist/*.zip --clobber

@@ -1,0 +1,63 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AmiGotekMediaBuilder.Gui.MainWindow"
+        Title="AmiGotekMediaBuilder"
+        Width="980" Height="700"
+        MinWidth="700" MinHeight="520"
+        FontSize="15">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto,52,120" Margin="16" RowSpacing="8">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+      <TextBox x:Name="LibraryRootText" Watermark="Source directory (scanned)" TextChanged="PathChanged" />
+      <Button Grid.Column="1" Content="Browse…" Width="100" Click="BrowseRoot" />
+    </Grid>
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+      <TextBox x:Name="WorkingDirectoryText" Watermark="Working directory (assets + catalog)" TextChanged="PathChanged" />
+      <Button Grid.Column="1" Content="Browse…" Width="100" Click="BrowseWorking" />
+    </Grid>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+      <TextBox x:Name="DestinationDirectoryText" Watermark="Destination directory (staging)" TextChanged="PathChanged" />
+      <Button Grid.Column="1" Content="Browse…" Width="100" Click="BrowseDestination" />
+    </Grid>
+    <WrapPanel Grid.Row="3" Orientation="Horizontal" ItemSpacing="8">
+      <Button x:Name="ScanButton" Content="Scan" Width="100" Click="ScanClick" />
+      <Button x:Name="BuildButton" Content="Build" Width="120" Click="BuildClick" IsEnabled="False" />
+      <CheckBox x:Name="OnlineRequested" Content="Online metadata + artwork" VerticalContentAlignment="Center" />
+    </WrapPanel>
+    <WrapPanel Grid.Row="4" Orientation="Horizontal" ItemSpacing="8">
+      <CheckBox x:Name="GateAcknowledged" Content="Export gate acknowledged" VerticalContentAlignment="Center" />
+      <TextBlock Text="Screen" VerticalAlignment="Center" />
+      <ComboBox x:Name="ScreenCombo" Width="360" SelectedIndex="0">
+        <ComboBox.ItemTemplate>
+          <DataTemplate>
+            <TextBlock Text="{Binding DisplayName}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <TextBlock Text="Run ID" VerticalAlignment="Center" />
+      <TextBox x:Name="RunId" Text="gui-run" Width="120" />
+      <Button x:Name="ExportButton" Content="Export" Width="90" Click="ExportClick" IsEnabled="False" />
+    </WrapPanel>
+    <ListBox x:Name="ResultsList" Grid.Row="5">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" Margin="4">
+            <Border Width="120" Height="80" Background="{DynamicResource HolSurfaceBrush}" HorizontalAlignment="Left">
+              <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
+            </Border>
+            <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+    <StackPanel Grid.Row="6" Spacing="4">
+      <ProgressBar x:Name="OperationProgress" Minimum="0" Maximum="100" Value="0" Height="12" />
+      <TextBlock x:Name="ProviderStatusText" Foreground="{DynamicResource HolPrimaryBrush}" TextWrapping="Wrap" />
+      <TextBlock x:Name="StatusText" Foreground="{DynamicResource HolMutedTextBrush}" TextWrapping="Wrap" />
+    </StackPanel>
+    <TextBox x:Name="CurrentActivityText" Grid.Row="7" IsReadOnly="True" AcceptsReturn="True"
+             TextWrapping="Wrap" Watermark="Current activity" />
+    <TextBox x:Name="LogText" Grid.Row="8" IsReadOnly="True" AcceptsReturn="True"
+             TextWrapping="Wrap" ScrollViewer.VerticalScrollBarVisibility="Auto"
+             Watermark="Operation log" />
+  </Grid>
+</Window>
