@@ -1,6 +1,6 @@
 # AmiGotekMediaBuilder — C#/.NET
 
-**Language:** [polski / Polish](README.md) | English
+**Language:** [polski / Polish](README.PL.md) | English
 
 A C#/.NET 10 migration of `ami-gotek-media-builder`. It scans ADF, DSK, and
 ZIP files, parses TOSEC-style names, groups multi-disk releases, maintains
@@ -293,9 +293,10 @@ ESP32-S3-Touch-LCD-2.8, matching the
 
 ## GitHub releases
 
-`.github/workflows/release.yml` runs for a published Release or a `v*` tag such
-as `v1.1.1`. It publishes self-contained, single-file CLI and GUI binaries for
-both products with the .NET RIDs `win-x64`, `win-arm64`, `linux-x64`,
+`.github/workflows/release.yml` runs only when a GitHub Release is published for
+a `v*` tag such as `v1.1.1`. Ordinary commits and branch pushes do not start
+this workflow. It publishes self-contained, single-file CLI and GUI binaries
+for both products with the .NET RIDs `win-x64`, `win-arm64`, `linux-x64`,
 `linux-arm64`, `osx-x64`, and `osx-arm64`.
 
 Example asset names:
@@ -308,7 +309,17 @@ ami-gotek-media-builder-demoscene-gui-v1.1.1-win-x64.zip
 ```
 
 The ZIP files include the .NET runtime. A target machine therefore does not
-need a separate .NET installation.
+need a separate .NET installation. The workflow uses Node.js 24-compatible
+GitHub Actions for checkout, .NET setup, and artifact transfer.
+
+To publish a new version, push the tag and then create/publish a GitHub Release
+using that tag:
+
+```powershell
+git tag v1.1.1
+git push origin v1.1.1
+gh release create v1.1.1 --generate-notes --title v1.1.1
+```
 
 ## Security and scope
 
@@ -326,4 +337,3 @@ safe HTTP transport, and cross-platform Avalonia GUIs.
 Out of scope: DMS/LHA conversion to ADF, OCR/PDF artwork extraction, manual
 approval workflows, and complete compatibility with every feature of the
 original Python application.
-
