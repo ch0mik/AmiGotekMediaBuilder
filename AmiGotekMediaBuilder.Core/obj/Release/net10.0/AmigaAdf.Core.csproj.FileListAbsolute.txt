@@ -1,9 +1,0 @@
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\bin\Release\net10.0\AmigaAdf.Core.deps.json
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\bin\Release\net10.0\AmigaAdf.Core.dll
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\obj\Release\net10.0\AmigaAdf.Core.GeneratedMSBuildEditorConfig.editorconfig
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\obj\Release\net10.0\AmigaAdf.Core.AssemblyInfoInputs.cache
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\obj\Release\net10.0\AmigaAdf.Core.AssemblyInfo.cs
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\obj\Release\net10.0\AmigaAdf.Core.csproj.CoreCompileInputs.cache
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\obj\Release\net10.0\AmigaAdf.Core.dll
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\obj\Release\net10.0\refint\AmigaAdf.Core.dll
-C:\tmp\amiga-adf-library-builder-csharp\AmigaAdf.Core\obj\Release\net10.0\ref\AmigaAdf.Core.dll
