@@ -163,6 +163,8 @@ public sealed class PouetCatalogProvider : IDisposable
         };
         if (!string.IsNullOrWhiteSpace(query.Type))
             parameters.Add($"type%5B0%5D={Uri.EscapeDataString(query.Type)}");
+        if (!string.IsNullOrWhiteSpace(query.Search))
+            parameters.Add($"search={Uri.EscapeDataString(query.Search)}");
         return new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"),
             "prodlist.php?" + string.Join('&', parameters)).ToString();
     }

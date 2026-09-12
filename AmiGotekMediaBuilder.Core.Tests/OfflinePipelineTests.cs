@@ -33,9 +33,9 @@ public sealed class OfflinePipelineTests
 
             Assert.Empty(exported.Errors);
             Assert.Equal(1, exported.ReleasesExported);
-            Assert.Equal(3, exported.FilesWritten.Count);
-            Assert.True(File.Exists(Path.Combine(exported.StagingRoot, "ADF", "Oil Imperium ECS", "Oil Imperium ECS-1.adf")));
-            Assert.True(File.Exists(Path.Combine(exported.StagingRoot, "ADF", "Oil Imperium ECS", "Oil Imperium ECS-2.adf")));
+            Assert.Equal(4, exported.FilesWritten.Count);
+            Assert.True(File.Exists(Path.Combine(exported.StagingRoot, "ADF", "Games", "Oil Imperium ECS", "Oil Imperium ECS (Disk 1 of 2).adf")));
+            Assert.True(File.Exists(Path.Combine(exported.StagingRoot, "ADF", "Games", "Oil Imperium ECS", "Oil Imperium ECS (Disk 2 of 2).adf")));
         }
         finally
         {

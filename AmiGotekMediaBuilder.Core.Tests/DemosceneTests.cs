@@ -123,6 +123,21 @@ public sealed class DemosceneTests
     }
 
     [Fact]
+    public void CatalogMergerSortsProductionsNewestFirst()
+    {
+        var old = new DemosceneProduction("1", "Older Demo", null, "1999", "demo",
+            DemoscenePlatform.OcsEcs, "https://www.pouet.net/prod.php?which=1", null, null, []);
+        var newest = new DemosceneProduction("2", "Newest Demo", null, "2024", "demo",
+            DemoscenePlatform.OcsEcs, "https://www.pouet.net/prod.php?which=2", null, null, []);
+        var undated = new DemosceneProduction("3", "Undated Demo", null, null, "demo",
+            DemoscenePlatform.OcsEcs, "https://www.pouet.net/prod.php?which=3", null, null, []);
+
+        var result = DemosceneCatalogMerger.Merge([old, undated, newest]);
+
+        Assert.Equal(["2", "1", "3"], result.Select(production => production.PouetId));
+    }
+
+    [Fact]
     public async Task DemozooProviderBrowsesOnlyDemoTypeForSelectedPlatform()
     {
         using var client = new SafeHttpClient(handler: new DemozooHandler());
@@ -188,6 +203,33 @@ public sealed class DemosceneTests
 
             Assert.Equal(1, result.Downloaded);
             Assert.Single(Directory.EnumerateFiles(root, "*.adf", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchDownloaderUsesGotekDemosceneCategoryWhenRequested()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amiga-demoscene-gotek-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var disk = Enumerable.Range(0, 1024).Select(i => (byte)i).ToArray();
+            using var client = new SafeHttpClient(handler: new DownloadHandler(CreateZip(disk)));
+            using var service = new DemosceneDownloadService(client);
+            var production = new DemosceneProduction("44", "Example Demo", null, "1999", "demo",
+                DemoscenePlatform.Aga, "https://example.test/prod.php?which=44", null, null,
+                [new DemosceneDownloadLink("https://example.test/demo.zip", "download", DemosceneAssetFormat.Zip, "demo.zip")]);
+
+            var result = await service.DownloadAsync([production], new DemosceneDownloadOptions(root,
+                MaxConcurrency: 1, RequestDelayMilliseconds: 0, GotekExportLayout: true));
+
+            Assert.Equal(1, result.Downloaded);
+            Assert.True(File.Exists(Path.Combine(root, "ADF", "Demoscene", "Example Demo",
+                "Example Demo (Disk 1 of 2)(Data).adf")));
         }
         finally
         {

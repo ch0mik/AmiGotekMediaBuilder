@@ -35,9 +35,8 @@ public static partial class ReleaseGrouper
                     Group = first.Group, Chipset = first.Chipset, Language = first.Language,
                     Version = first.Version, AltMarker = first.AltMarker, Extension = first.Extension,
                     SourceSha256 = first.SourceSha256, Folder = directoryFolder,
-                    // Export always uses compact Gotek names (Game-1, Game-2,
-                    // Game-Save). TOSEC markers are retained only as parsed
-                    // input metadata and for ordering.
+                    // Export uses canonical TOSEC names. Parsed markers retain
+                    // their role in disk ordering and output filenames.
                     UseSequentialDiskNames = true,
                     IsDemoscene = allRecords.Any(r => r.IsDemoscene)
                 };
@@ -50,6 +49,17 @@ public static partial class ReleaseGrouper
         FlagNearDuplicates(groups);
         foreach (var group in groups)
         {
+            var missingDisks = GetMissingDeclaredDisks(group.Disks);
+            if (missingDisks.Count > 0)
+            {
+                var expected = group.Disks
+                    .Where(disk => disk.TotalDisks.HasValue)
+                    .Max(disk => disk.TotalDisks!.Value);
+                AppendReason(group,
+                    $"Incomplete TOSEC set: expected disks 1-{expected}; missing {FormatDiskNumbers(missingDisks)}. " +
+                    "Release skipped; no partial set is exported.");
+            }
+
             if (!group.HasMainDisk && group.Specials.Count > 0)
             {
                 var roles = string.Join(", ", group.Specials.Select(s => s.SpecialRole).Where(r => r is not null).Distinct().OrderBy(r => r));
@@ -139,12 +149,22 @@ public static partial class ReleaseGrouper
     private static bool IsComplete(IReadOnlyList<ParsedRecord> disks)
     {
         if (disks.Count == 0) return false;
-        var totals = disks.Where(d => d.TotalDisks.HasValue).Select(d => d.TotalDisks!.Value).ToArray();
-        if (totals.Length == 0) return true;
-        var expected = totals.Max();
-        var have = disks.Where(d => d.DiskNumber.HasValue).Select(d => d.DiskNumber!.Value).ToHashSet();
-        return Enumerable.Range(1, expected).All(have.Contains);
+        return GetMissingDeclaredDisks(disks).Count == 0;
     }
+
+    private static IReadOnlyList<int> GetMissingDeclaredDisks(IReadOnlyList<ParsedRecord> disks)
+    {
+        var totals = disks.Where(disk => disk.TotalDisks.HasValue)
+            .Select(disk => disk.TotalDisks!.Value).ToArray();
+        if (totals.Length == 0) return [];
+        var expected = totals.Max();
+        var have = disks.Where(disk => disk.DiskNumber.HasValue)
+            .Select(disk => disk.DiskNumber!.Value).ToHashSet();
+        return Enumerable.Range(1, expected).Where(number => !have.Contains(number)).ToArray();
+    }
+
+    private static string FormatDiskNumbers(IReadOnlyList<int> disks) =>
+        disks.Count == 1 ? $"disk {disks[0]}" : $"disks {string.Join(", ", disks)}";
 
     private static void FlagNearDuplicates(List<ReleaseGroup> groups)
     {

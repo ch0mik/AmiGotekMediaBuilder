@@ -5,6 +5,16 @@ namespace AmiGotekMediaBuilder.Core.Tests;
 public sealed class FilenameParserTests
 {
     [Fact]
+    public void ParsesExportedTosecSaveDiskName()
+    {
+        var record = FilenameParser.Parse("Game (Save Disk).adf");
+
+        Assert.Equal("Game", record.Title);
+        Assert.True(record.SpecialDisk);
+        Assert.Equal("save", record.SpecialRole);
+    }
+
+    [Fact]
     public void ParsesTosecTagsAndNumericDisk()
     {
         var record = FilenameParser.Parse("Oil_Imperium_(1992)(ECS)(en)(v1.1e)[cr QTX](Disk 2 of 3).adf");

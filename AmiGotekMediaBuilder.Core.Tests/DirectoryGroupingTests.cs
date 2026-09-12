@@ -9,7 +9,7 @@ namespace AmiGotekMediaBuilder.Core.Tests;
 public sealed class DirectoryGroupingTests
 {
     [Fact]
-    public void KeepsImagesFromOneSubdirectoryTogetherAndUsesSequentialNames()
+    public void KeepsImagesFromOneSubdirectoryTogetherAndUsesTosecNames()
     {
         var records = new[]
         {
@@ -30,13 +30,13 @@ public sealed class DirectoryGroupingTests
         Assert.True(group.UseSequentialDiskNames);
         Assert.Equal(2, group.Disks.Count);
         Assert.Single(group.Specials);
-        Assert.Equal("Atlantis-1.adf", ReleaseNamer.GetDiskFilename(group, group.Disks[0], 0, 3));
-        Assert.Equal("Atlantis-2.adf", ReleaseNamer.GetDiskFilename(group, group.Disks[1], 1, 3));
-        Assert.Equal("Atlantis-Save.adf", ReleaseNamer.GetDiskFilename(group, group.Specials[0], 2, 3));
+        Assert.Equal("Atlantis (Disk 1 of 2).adf", ReleaseNamer.GetDiskFilename(group, group.Disks[0], 0, 3));
+        Assert.Equal("Atlantis (Disk 2 of 2).adf", ReleaseNamer.GetDiskFilename(group, group.Disks[1], 1, 3));
+        Assert.Equal("Atlantis (Save Disk).adf", ReleaseNamer.GetDiskFilename(group, group.Specials[0], 2, 3));
     }
 
     [Fact]
-    public void AppliesTheSameConventionToDashNumberedFilesInIntakeRoot()
+    public void AppliesTosecConventionToDashNumberedFilesInIntakeRoot()
     {
         var first = FilenameParser.Parse("Atlantis - 01.adf");
         var second = FilenameParser.Parse("Atlantis - 02.adf");
@@ -46,9 +46,9 @@ public sealed class DirectoryGroupingTests
 
         Assert.Null(group.Folder);
         Assert.True(group.UseSequentialDiskNames);
-        Assert.Equal("Atlantis-1.adf", ReleaseNamer.GetDiskFilename(group, group.Disks[0], 0, 3));
-        Assert.Equal("Atlantis-2.adf", ReleaseNamer.GetDiskFilename(group, group.Disks[1], 1, 3));
-        Assert.Equal("Atlantis-Save.adf", ReleaseNamer.GetDiskFilename(group, group.Specials[0], 2, 3));
+        Assert.Equal("Atlantis (Disk 1 of 2).adf", ReleaseNamer.GetDiskFilename(group, group.Disks[0], 0, 3));
+        Assert.Equal("Atlantis (Disk 2 of 2).adf", ReleaseNamer.GetDiskFilename(group, group.Disks[1], 1, 3));
+        Assert.Equal("Atlantis (Save Disk).adf", ReleaseNamer.GetDiskFilename(group, group.Specials[0], 2, 3));
     }
 
     [Fact]
@@ -106,9 +106,9 @@ public sealed class DirectoryGroupingTests
         Assert.Equal("Atlantis", group.Title);
         Assert.Equal(2, group.Disks.Count);
         Assert.Single(group.Specials);
-        Assert.Equal("Atlantis-1.adf", ReleaseNamer.GetDiskFilename(group, group.Disks[0], 0, 3));
-        Assert.Equal("Atlantis-2.adf", ReleaseNamer.GetDiskFilename(group, group.Disks[1], 1, 3));
-        Assert.Equal("Atlantis-Save.adf", ReleaseNamer.GetDiskFilename(group, group.Specials[0], 2, 3));
+        Assert.Equal("Atlantis (Disk 1 of 2).adf", ReleaseNamer.GetDiskFilename(group, group.Disks[0], 0, 3));
+        Assert.Equal("Atlantis (Disk 2 of 2).adf", ReleaseNamer.GetDiskFilename(group, group.Disks[1], 1, 3));
+        Assert.Equal("Atlantis (Save Disk).adf", ReleaseNamer.GetDiskFilename(group, group.Specials[0], 2, 3));
     }
 
     [Fact]
@@ -135,14 +135,60 @@ public sealed class DirectoryGroupingTests
 
             Assert.Single(groups);
             Assert.Equal(1, result.ReleasesExported);
-            var output = Path.Combine(result.StagingRoot, "ADF", "Atlantis");
-            Assert.True(File.Exists(Path.Combine(output, "Atlantis-1.adf")));
-            Assert.True(File.Exists(Path.Combine(output, "Atlantis-2.adf")));
-            Assert.True(File.Exists(Path.Combine(output, "Atlantis-Save.adf")));
+            var output = Path.Combine(result.StagingRoot, "ADF", "Games", "Atlantis");
+            Assert.True(File.Exists(Path.Combine(output, "Atlantis (Disk 1 of 2).adf")));
+            Assert.True(File.Exists(Path.Combine(output, "Atlantis (Disk 2 of 2).adf")));
+            Assert.True(File.Exists(Path.Combine(output, "Atlantis (Save Disk).adf")));
         }
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public void QuarantinesIncompleteDeclaredTosecSetAndDoesNotExportIt()
+    {
+        var records = new[]
+        {
+            "Odyssey v1.0 (1991-12-28)(Alcatraz)(Disk 2 of 5).adf",
+            "Odyssey v1.0 (1991-12-28)(Alcatraz)(Disk 3 of 5).adf",
+            "Odyssey v1.0 (1991-12-28)(Alcatraz)(Disk 4 of 5).adf",
+            "Odyssey v1.0 (1991-12-28)(Alcatraz)(Disk 5 of 5).adf"
+        }.Select(FilenameParser.Parse).ToArray();
+        var group = Assert.Single(ReleaseGrouper.Group(records));
+
+        Assert.False(group.IsComplete);
+        Assert.Contains("expected disks 1-5", group.QuarantineReason, StringComparison.Ordinal);
+        Assert.Contains("missing disk 1", group.QuarantineReason, StringComparison.Ordinal);
+
+        var root = Path.Combine(Path.GetTempPath(), "amiga-incomplete-set-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var result = GotekExporter.Export([group], root, Path.Combine(root, "staging"), "run",
+                upstreamTaskClosed: true, verifiedArtworkWidth: 320, verifiedArtworkHeight: 240);
+
+            Assert.Equal(0, result.ReleasesExported);
+            Assert.Equal([group.ReleaseKey], result.SkippedQuarantined);
+            Assert.Empty(result.FilesWritten);
+            Assert.False(Directory.Exists(Path.Combine(result.StagingRoot, "ADF", "Games", "Odyssey v1.0")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void KeepsACompleteVersionOfAReleaseExportable()
+    {
+        var records = Enumerable.Range(1, 5).Select(number => FilenameParser.Parse(
+            $"Odyssey v1.1c (1991-12-28)(Alcatraz)(Disk {number} of 5)[TP1#1].adf"));
+
+        var group = Assert.Single(ReleaseGrouper.Group(records));
+
+        Assert.True(group.IsComplete);
+        Assert.Null(group.QuarantineReason);
+        Assert.Equal(5, group.Disks.Count);
     }
 }

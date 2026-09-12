@@ -46,8 +46,8 @@ public sealed class OnlineProviderTests
 
             var result = Assert.Single(records);
             Assert.Null(result.ArtworkUrl);
-            Assert.Equal(DefaultArtworkService.ProviderId, result.ArtworkProvider);
-            Assert.True(result.ArtworkPath is not null && File.Exists(result.ArtworkPath));
+            Assert.Null(result.ArtworkProvider);
+            Assert.Null(result.ArtworkPath);
             Assert.Equal("Canonical Game", result.Title);
             Assert.Equal("offline-filename", result.Provider);
             Assert.Null(result.Description);
@@ -114,10 +114,8 @@ public sealed class OnlineProviderTests
             var result = Assert.Single(new OfflineEnricher().Enrich(
                 [group], Path.Combine(root, "catalog"), nfo));
 
-            Assert.Equal(DefaultArtworkService.ProviderId, result.ArtworkProvider);
-            Assert.NotNull(result.ArtworkPath);
-            Assert.True(File.Exists(result.ArtworkPath));
-            Assert.True(new FileInfo(result.ArtworkPath!).Length > 1_000);
+            Assert.Null(result.ArtworkProvider);
+            Assert.Null(result.ArtworkPath);
         }
         finally
         {

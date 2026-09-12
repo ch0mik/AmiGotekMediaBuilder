@@ -330,7 +330,8 @@ public partial class MainWindow : Window
                 nfoDirectory: config.NfoDirectory,
                 artworkProcessedDirectory: config.ArtworkProcessedDirectory,
                 artworkOriginalDirectory: config.ArtworkOriginalDirectory,
-                progress: exportProgress));
+                progress: exportProgress,
+                rtfmDirectory: config.RtfmDirectory));
             progress.Report((95, $"Wrote {result.FilesWritten.Count} file(s)."));
             return ($"Exported {result.ReleasesExported} release(s); " +
                     $"{result.FilesWritten.Count} file(s), {result.Conflicts.Count} conflict(s), " +

@@ -205,6 +205,7 @@ public sealed record PathConfig
         "assets" => Directory.Exists(Path.Combine(path, "artwork-original")) ||
                     Directory.Exists(Path.Combine(path, "artwork-processed")) ||
                     Directory.Exists(Path.Combine(path, "nfo")) ||
+                    Directory.Exists(Path.Combine(path, "rtfm")) ||
                     Directory.Exists(Path.Combine(path, "demoscene")),
         "work" => Directory.Exists(Path.Combine(path, "staging")),
         "config" => File.Exists(Path.Combine(path, "config.toml")) ||

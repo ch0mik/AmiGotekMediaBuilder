@@ -14,27 +14,28 @@ public static class IntakeScanner
 
     public static IReadOnlyList<ScanRecord> ScanDirectory(
         string originalDirectory, IEnumerable<string>? excludedDirectories = null,
-        IProgress<ScanProgress>? progress = null)
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(originalDirectory);
         var records = new List<ScanRecord>();
         ScanDirectoryInto(new DirectoryInfo(originalDirectory), records,
-            NormalizeExclusions(excludedDirectories), progress);
+            NormalizeExclusions(excludedDirectories), progress, cancellationToken);
         return records;
     }
 
     /// <summary>Scans several read-only intake roots as one corpus.</summary>
     public static IReadOnlyList<ScanRecord> ScanDirectories(
         IEnumerable<string> directories, IEnumerable<string>? excludedDirectories = null,
-        IProgress<ScanProgress>? progress = null)
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(directories);
         var records = new List<ScanRecord>();
         var exclusions = NormalizeExclusions(excludedDirectories);
         foreach (var path in directories)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(path)) continue;
-            ScanDirectoryInto(new DirectoryInfo(path), records, exclusions, progress);
+            ScanDirectoryInto(new DirectoryInfo(path), records, exclusions, progress, cancellationToken);
         }
         return records;
     }
@@ -59,7 +60,7 @@ public static class IntakeScanner
 
     private static void ScanDirectoryInto(
         DirectoryInfo directory, List<ScanRecord> records, IReadOnlyList<string> exclusions,
-        IProgress<ScanProgress>? progress)
+        IProgress<ScanProgress>? progress, CancellationToken cancellationToken)
     {
         if (!directory.Exists)
             throw new DirectoryNotFoundException($"intake directory missing: {directory.FullName}");
@@ -67,6 +68,7 @@ public static class IntakeScanner
         foreach (var file in EnumerateFiles(directory, exclusions)
                      .OrderBy(f => Path.GetRelativePath(directory.FullName, f.FullName), StringComparer.Ordinal))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (SupportedExtensions.Contains(file.Extension))
             {
                 progress?.Report(new ScanProgress(file.FullName, "hashing"));
@@ -78,7 +80,7 @@ public static class IntakeScanner
             }
             if (!file.Extension.Equals(".zip", StringComparison.OrdinalIgnoreCase)) continue;
             progress?.Report(new ScanProgress(file.FullName, "opening ZIP"));
-            records.AddRange(ScanZip(file, progress));
+            records.AddRange(ScanZip(file, progress, cancellationToken));
         }
     }
 
@@ -107,13 +109,14 @@ public static class IntakeScanner
             .ToArray();
 
     private static IReadOnlyList<ScanRecord> ScanZip(
-        FileInfo archive, IProgress<ScanProgress>? progress = null)
+        FileInfo archive, IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         using var zip = ZipFile.OpenRead(archive.FullName);
         var records = new List<ScanRecord>();
         foreach (var entry in zip.Entries.Where(e => !string.IsNullOrEmpty(e.Name) &&
                      SupportedExtensions.Contains(Path.GetExtension(e.Name))))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new ScanProgress(
                 $"{archive.FullName}::{entry.FullName}", "hashing ZIP entry"));
             using var stream = entry.Open();

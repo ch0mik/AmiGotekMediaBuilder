@@ -33,7 +33,7 @@ public sealed class DemosceneArtworkService : IDisposable
         string processedDirectory,
         CancellationToken cancellationToken = default,
         IProgress<DemosceneArtworkResult>? progress = null,
-        int requestDelayMilliseconds = 200)
+        int requestDelayMilliseconds = 0)
     {
         ArgumentNullException.ThrowIfNull(productions);
         Directory.CreateDirectory(originalDirectory);

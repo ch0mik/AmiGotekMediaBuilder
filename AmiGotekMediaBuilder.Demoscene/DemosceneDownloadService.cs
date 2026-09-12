@@ -144,7 +144,8 @@ public sealed class DemosceneDownloadService : IDisposable
                 break;
             }
             var written = await StoreAsync(item.Production, item.Platform, image,
-                imageHash, options.DestinationDirectory, knownHashes, manifestLock, cancellationToken);
+                imageHash, options.DestinationDirectory, options.GotekExportLayout,
+                knownHashes, manifestLock, cancellationToken);
             results.Add(Result(item, written.Status, written.Path, written.Error,
                 image.Bytes.LongLength, imageHash, image.Format));
             if (written.Status == DemosceneDownloadStatus.Failed)
@@ -275,16 +276,20 @@ public sealed class DemosceneDownloadService : IDisposable
         ExtractedImage image,
         string sha256,
         string root,
+        bool gotekExportLayout,
         ConcurrentDictionary<string, string> knownHashes,
         SemaphoreSlim manifestLock,
         CancellationToken cancellationToken)
     {
-        var folder = Path.Combine(root, PlatformFolder(platform),
-            SafeSlug(production.Year is null ? production.Title : $"{production.Year} {production.Title}"));
-        Directory.CreateDirectory(folder);
         var baseName = TosecFileStem(image.FileName, image.DiskNumber, image.TotalDisks);
         if (string.IsNullOrWhiteSpace(baseName)) baseName = SafeSlug(production.Title);
         var extension = image.Format == DemosceneAssetFormat.Dsk ? ".dsk" : ".adf";
+        var folder = gotekExportLayout
+            ? Path.Combine(root, extension.Equals(".dsk", StringComparison.OrdinalIgnoreCase) ? "DSK" : "ADF",
+                "Demoscene", SafeSlug(production.Title))
+            : Path.Combine(root, PlatformFolder(platform),
+                SafeSlug(production.Year is null ? production.Title : $"{production.Year} {production.Title}"));
+        Directory.CreateDirectory(folder);
         if (knownHashes.TryGetValue(sha256, out var existingPath))
             return new StoredImage(DemosceneDownloadStatus.AlreadyPresent, existingPath, null);
         var target = UniquePath(folder, baseName, extension, sha256, image.Bytes);

@@ -25,7 +25,15 @@ public sealed class ReleaseNamerTests
     }
 
     [Fact]
-    public void ConvertsTosecDiskMarkerToCompactOutputName()
+    public void RemovesTrailingDotsThatAreInvalidWindowsPathComponents()
+    {
+        var group = new ReleaseGroup { ReleaseKey = "x", Title = "Gettin' Tired of...", Extension = "adf" };
+
+        Assert.Equal("Gettin_ Tired of", ReleaseNamer.GetBasename(group));
+    }
+
+    [Fact]
+    public void PreservesTosecDiskMarkerInOutputName()
     {
         var group = new ReleaseGroup
         {
@@ -43,7 +51,7 @@ public sealed class ReleaseNamerTests
         group.Records.Add(disk);
         group.Disks.Add(disk);
 
-        Assert.Equal("Game-2.adf", ReleaseNamer.GetDiskFilename(group, disk, 0, 1));
+        Assert.Equal("Game (Disk 2 of 2)(Data).adf", ReleaseNamer.GetDiskFilename(group, disk, 0, 1));
     }
 
     [Fact]
@@ -88,7 +96,7 @@ public sealed class ReleaseNamerTests
         group.Disks.Add(disk);
         group.Specials.Add(save);
 
-        Assert.Equal("Atlantis-1.adf", ReleaseNamer.GetDiskFilename(group, disk, 0, 2));
-        Assert.Equal("Atlantis-Save.adf", ReleaseNamer.GetDiskFilename(group, save, 1, 2));
+        Assert.Equal("Atlantis.adf", ReleaseNamer.GetDiskFilename(group, disk, 0, 2));
+        Assert.Equal("Atlantis (Save Disk).adf", ReleaseNamer.GetDiskFilename(group, save, 1, 2));
     }
 }

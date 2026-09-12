@@ -39,12 +39,15 @@ public static partial class GotekExporter
         string? nfoDirectory = null,
         string? artworkProcessedDirectory = null,
         string? artworkOriginalDirectory = null,
-        IProgress<ExportProgress>? progress = null)
+        IProgress<ExportProgress>? progress = null,
+        string? rtfmDirectory = null,
+        bool exportToDestinationRoot = false,
+        CancellationToken cancellationToken = default)
     {
         var safeRunId = ValidateRunId(runId);
         var parent = Path.GetFullPath(stagingDirectory);
-        var stagingRoot = Path.GetFullPath(Path.Combine(parent, safeRunId));
-        if (!IsWithin(stagingRoot, parent))
+        var stagingRoot = exportToDestinationRoot ? parent : Path.GetFullPath(Path.Combine(parent, safeRunId));
+        if (!exportToDestinationRoot && !IsWithin(stagingRoot, parent))
             throw new InvalidOperationException("refusing to export outside staging directory");
         var gate = CheckGate(upstreamTaskClosed, verifiedArtworkWidth, verifiedArtworkHeight);
         var result = new GotekExportResult
@@ -58,12 +61,15 @@ public static partial class GotekExporter
             return result;
         }
 
-        Directory.CreateDirectory(Path.Combine(stagingRoot, "ADF"));
-        Directory.CreateDirectory(Path.Combine(stagingRoot, "DSK"));
-
         var releaseGroups = groups.ToArray();
+        foreach (var group in releaseGroups)
+        {
+            var branch = string.Equals(group.Extension, "dsk", StringComparison.OrdinalIgnoreCase) ? "DSK" : "ADF";
+            Directory.CreateDirectory(Path.Combine(stagingRoot, branch, GetCategory(group)));
+        }
         for (var index = 0; index < releaseGroups.Length; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var group = releaseGroups[index];
             progress?.Report(new ExportProgress(index + 1, releaseGroups.Length,
                 group.ReleaseKey, group.Title ?? group.ReleaseKey));
@@ -79,13 +85,14 @@ public static partial class GotekExporter
             if (ordered.Length == 0) continue;
             var basename = ReleaseNamer.GetBasename(group);
             var branch = string.Equals(group.Extension, "dsk", StringComparison.OrdinalIgnoreCase) ? "DSK" : "ADF";
-            var folder = Path.Combine(stagingRoot, branch, basename);
+            var folder = Path.Combine(stagingRoot, branch, GetCategory(group), basename);
             for (var i = 0; i < ordered.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var diskName = ReleaseNamer.GetDiskFilename(group, ordered[i], i, ordered.Length);
                 var source = ordered[i].SourcePath ?? Path.Combine(originalDirectory, ordered[i].SourceFilename);
                 var destination = Path.Combine(folder, diskName);
-                Copy(source, destination, verifyOnly, result);
+                Copy(source, destination, verifyOnly, result, cancellationToken);
             }
             var first = group.Records.FirstOrDefault();
             var generatedNfo = GotekNfoRenderer.Render(
@@ -97,37 +104,31 @@ public static partial class GotekExporter
                 : generatedNfo;
             WriteBytes(Encoding.UTF8.GetBytes(nfo), Path.Combine(folder, $"{basename}.nfo"), verifyOnly, result);
 
-            // Artwork is a companion to a game disk image. Demoscene groups
-            // have their own thumbnail cache and are deliberately excluded
-            // here. For games, prefer the processed cache produced by online
-            // enrichment, then fall back to a local master. Keep the
-            // provider's image format (JPG/PNG/WEBP) instead of inventing an
-            // extension that does not match the bytes.
+            var rtfmPath = rtfmDirectory is null ? null : Path.Combine(rtfmDirectory, $"{basename}.rtfm");
+            if (rtfmPath is not null && File.Exists(rtfmPath))
+                WriteBytes(File.ReadAllBytes(rtfmPath), Path.Combine(folder, $"{basename}.rtfm"), verifyOnly, result);
+
+            // Prefer acquired artwork, but write the embedded diskette only
+            // into the export folder when none exists. Never materialize this
+            // fallback in the artwork cache: a later run must retry scraping.
             var artwork = group.IsDemoscene ? null :
                 FindArtwork(basename, artworkProcessedDirectory, artworkOriginalDirectory) ??
                 FindArtwork(basename, artworkOriginalDirectory, artworkOriginalDirectory);
-            if (artwork is null && !group.IsDemoscene && !verifyOnly &&
-                !HasArtworkCandidate(basename, artworkProcessedDirectory, artworkOriginalDirectory) &&
-                !string.IsNullOrWhiteSpace(artworkOriginalDirectory) &&
-                !string.IsNullOrWhiteSpace(artworkProcessedDirectory))
-            {
-                // Keep export useful for callers that skipped enrichment (or
-                // are exporting an older build): materialize the same embedded
-                // game fallback used by the metadata pipeline.
-                var fallback = DefaultArtworkService.Ensure(
-                    group, artworkOriginalDirectory!, artworkProcessedDirectory!);
-                artwork = fallback?.ProcessedPath ?? fallback?.OriginalPath;
-            }
             if (artwork is not null)
                 WriteBytes(File.ReadAllBytes(artwork), Path.Combine(folder, Path.GetFileName(artwork)), verifyOnly, result);
+            else
+                WriteBytes(DefaultArtworkService.GetExportFallbackBytes(), Path.Combine(folder, $"{basename}.jpg"), verifyOnly, result);
             result.ReleasesExported++;
         }
         return result;
     }
 
-    private static void Copy(string source, string destination, bool verifyOnly, GotekExportResult result)
+    private static string GetCategory(ReleaseGroup group) => group.IsDemoscene ? "Demoscene" : "Games";
+
+    private static void Copy(string source, string destination, bool verifyOnly, GotekExportResult result,
+        CancellationToken cancellationToken)
     {
-        if (!TryReadSource(source, out var bytes))
+        if (!TryReadSource(source, out var bytes, cancellationToken))
         {
             result.Conflicts.Add($"source missing for {Path.GetFileName(source)}");
             return;
@@ -135,8 +136,9 @@ public static partial class GotekExporter
         WriteBytes(bytes, destination, verifyOnly, result);
     }
 
-    private static bool TryReadSource(string source, out byte[] bytes)
+    private static bool TryReadSource(string source, out byte[] bytes, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var marker = source.IndexOf("::", StringComparison.Ordinal);
         if (marker < 0)
         {
@@ -153,6 +155,7 @@ public static partial class GotekExporter
         using var stream = entry.Open();
         using var output = new MemoryStream();
         stream.CopyTo(output);
+        cancellationToken.ThrowIfCancellationRequested();
         bytes = output.ToArray();
         return true;
     }

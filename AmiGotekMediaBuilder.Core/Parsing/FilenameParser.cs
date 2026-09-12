@@ -12,6 +12,13 @@ public static partial class FilenameParser
             ["save"] = "save", ["intro"] = "intro", ["utility"] = "utility",
             ["util"] = "utility", ["companion"] = "companion"
         };
+    private static readonly IReadOnlyDictionary<string, string> ParenthesizedSpecialRoles =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["boot disk"] = "boot", ["character disk"] = "character",
+            ["save disk"] = "save", ["intro disk"] = "intro",
+            ["utility disk"] = "utility", ["companion disk"] = "companion"
+        };
     private static readonly IReadOnlyDictionary<char, int> LetterOrdinals =
         Enumerable.Range(0, 26).ToDictionary(i => (char)('A' + i), i => i + 1);
 
@@ -98,6 +105,11 @@ public static partial class FilenameParser
             else if (LanguageRegex().IsMatch(tag)) record.Language = tag.ToUpperInvariant();
             else if (VersionRegex().IsMatch(tag)) record.Version = tag;
             else if (MediaLabelRegex().IsMatch(tag)) record.MediaLabel = CanonicalMediaLabel(tag);
+            else if (record.DiskNumber is null && ParenthesizedSpecialRoles.TryGetValue(tag, out var specialRole))
+            {
+                record.SpecialDisk = true;
+                record.SpecialRole = specialRole;
+            }
             else if (tag.Length > 0) record.Publisher = record.Publisher is null ? tag : $"{record.Publisher} / {tag}";
         }
     }

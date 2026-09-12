@@ -27,7 +27,7 @@ public sealed class GotekExporterTests
     }
 
     [Fact]
-    public void CopiesProcessedArtworkAlongsideDiskAndNfo()
+    public void ExportsGamesCategoryAndRtfmAlongsideDiskNfoAndArtwork()
     {
         var root = Path.Combine(Path.GetTempPath(), "amiga-export-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -42,12 +42,49 @@ public sealed class GotekExporterTests
             var artworkDirectory = Path.Combine(root, "artwork");
             Directory.CreateDirectory(artworkDirectory);
             File.WriteAllBytes(Path.Combine(artworkDirectory, "Game.jpg"), [0xff, 0xd8, 0xff, 0xd9]);
+            var rtfmDirectory = Path.Combine(root, "rtfm");
+            Directory.CreateDirectory(rtfmDirectory);
+            File.WriteAllText(Path.Combine(rtfmDirectory, "Game.rtfm"), "Game manual");
 
             var result = GotekExporter.Export(new[] { group }, root, Path.Combine(root, "staging"), "run",
                 upstreamTaskClosed: true, verifiedArtworkWidth: 320, verifiedArtworkHeight: 240,
-                artworkProcessedDirectory: artworkDirectory);
+                artworkProcessedDirectory: artworkDirectory, rtfmDirectory: rtfmDirectory);
 
             Assert.Contains(result.FilesWritten, path => path.EndsWith("Game.jpg", StringComparison.OrdinalIgnoreCase));
+            var output = Path.Combine(result.StagingRoot, "ADF", "Games", "Game");
+            Assert.True(File.Exists(Path.Combine(output, "Game.adf")));
+            Assert.True(File.Exists(Path.Combine(output, "Game.nfo")));
+            Assert.True(File.Exists(Path.Combine(output, "Game.rtfm")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExportsDemosceneGroupsToDemosceneCategory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amiga-export-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "Scene.dsk");
+            File.WriteAllBytes(source, [1, 2, 3]);
+            var group = new ReleaseGroup
+            {
+                ReleaseKey = "scene|", Title = "Scene", Extension = "dsk", IsDemoscene = true
+            };
+            var record = new ParsedRecord { SourceFilename = "Scene.dsk", Extension = "dsk", SourcePath = source, Title = "Scene", IsDemoscene = true };
+            group.Records.Add(record);
+            group.Disks.Add(record);
+
+            var result = GotekExporter.Export(new[] { group }, root, Path.Combine(root, "staging"), "run",
+                upstreamTaskClosed: true, verifiedArtworkWidth: 320, verifiedArtworkHeight: 240);
+
+            var output = Path.Combine(result.StagingRoot, "DSK", "Demoscene", "Scene");
+            Assert.True(File.Exists(Path.Combine(output, "Scene.dsk")));
+            Assert.True(File.Exists(Path.Combine(output, "Scene.nfo")));
         }
         finally
         {

@@ -134,7 +134,8 @@ public sealed record DemosceneDownloadOptions(
     bool IncludeUnsupportedReport = true,
     bool FollowRedirects = true,
     int RequestDelayMilliseconds = 350,
-    int MaxLinksPerProduction = 32)
+    int MaxLinksPerProduction = 32,
+    bool GotekExportLayout = false)
 {
     public DemosceneDownloadOptions Normalize()
     {

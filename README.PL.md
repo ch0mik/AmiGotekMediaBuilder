@@ -1,6 +1,6 @@
 # AmiGotekMediaBuilder — C#/.NET
 
-**Język:** polski | [English](README.en.md)
+**Język:** polski | [English](README.md)
 
 Migracja narzędzia ami-gotek-media-builder do C# i .NET 10. Obecna wersja
 obejmuje skanowanie plików ADF/DSK/ZIP, parsowanie nazw, grupowanie wydań,
@@ -327,10 +327,36 @@ dotnet run --project AmiGotekMediaBuilder.Demoscene.Gui
 
 Okno ma własne filtry platformy, typ produkcji, ekran Gotek (lista profili
 480×320, 800×480 i 320×240), wyszukiwanie, miniaturki oraz przyciski
-`Download selected` i `Download all displayed`. Główne GUI
+`Download selected` i `Download all results`. Pole `Local library` jest
+opcjonalne: przycisk `Scan library` wyszukuje w nim istniejące ADF/DSK/ZIP, a następnie
+`Export scanned` eksportuje je do wybranego katalogu. Wyszukiwanie w Pouët i
+Demozoo działa bez katalogu źródłowego; eksport lokalny również dopasowuje
+tytuły do katalogu demosceny i pobiera dostępne okładki. Metadane i miniaturki korzystają z
+lokalnego cache'a aplikacji. Przed pobraniem lub eksportem trzeba wskazać
+`Export directory`. Oba przepływy tworzą układ gotowy dla GTi i zachowują
+kanoniczne nazwy TOSEC:
+
+~~~text
+<export-directory>\ADF\Demoscene\<Release>\<nazwa dysku TOSEC>.adf
+<export-directory>\DSK\Demoscene\<Release>\<nazwa dysku TOSEC>.dsk
+~~~
+
+Przykładowa nazwa wielodyskowa to
+`Example Demo (Disk 1 of 2)(Data).adf`. Miniaturka demoscenowa z cache'a
+jest kopiowana obok obrazu pod nazwą katalogu wydania, np. `Example Demo.jpg`.
+Główne GUI
 `AmiGotekMediaBuilder.Gui` nie skanuje ani nie eksportuje demosceny.
-Miniaturki demosceny pozostają w `assets\demoscene\` i nie są używane jako
-artwork gier.
+
+Gdy provider nie znajdzie artworku, w katalogu eksportu obok wydania zapisywana
+jest wbudowana grafika dyskietki. Nie trafia ona do cache'a ani katalogów
+roboczych — kolejny przebieg ponowi wyszukiwanie online. Ta sama zasada dotyczy
+gier i demosceny.
+
+Żądania demosceny nie mają sztucznego opóźnienia, dopóki host nie zasygnalizuje
+przeciążenia. Kod `429` respektuje nagłówek `Retry-After`; `429`, przejściowe
+błędy 5xx oraz błędy połączenia uruchamiają wspólny cooldown dla hosta i są
+ponawiane maksymalnie pięć razy z wykładniczym opóźnieniem. GUI pokazuje czas
+następnej próby zamiast przerywać eksport.
 
 ## Eksport Gotek
 
@@ -348,31 +374,35 @@ Wynik trafia wyłącznie do:
 
 ~~~text
 <library_root>\work\staging\<run-id>\
-├── ADF\<Release>\<Release>-1.adf
-└── DSK\<Release>\<Release>-2.dsk
+├── ADF\Games\<Release>\<Release> (Disk 1 of 2).adf
+└── DSK\Demoscene\<Release>\<Release>.dsk
 ~~~
 
-Dla zestawu wielodyskowego używane są zawsze proste nazwy
-<Release>-1.adf, <Release>-2.adf ... <Release>-n.adf. TOSEC na wejściu
-(np. `(Disk 2 of 2)(Data)`) służy do rozpoznania, grupowania i ustalenia
-numeru dysku, ale nie jest kopiowany do nazwy wyjściowej. Obrazy specjalne
-zachowują rolę, np. <Release>-Save.adf. Pojedynczy obraz bez numeru otrzymuje
-<Release>-1.adf lub <Release>-1.dsk. Obok obrazów znajduje się NFO.
+Zestawy wielodyskowe zachowują kanoniczne nazwy TOSEC, np.
+`<Release> (Disk 1 of 2).adf` oraz `<Release> (Disk 2 of 2)(Data).adf`.
+Obrazy specjalne zachowują rolę jako `<Release> (Save Disk).adf`, a pojedynczy
+obraz pozostaje `<Release>.adf` lub `<Release>.dsk`. Zwykłe wydania trafiają
+domyślnie do kategorii `Games`, a grupy demoscenowe do `Demoscene`. Obok
+obrazów znajduje się NFO, artwork oraz opcjonalny manual
+`assets\rtfm\<Release>.rtfm`.
 Istniejące pliki o tej samej zawartości są pomijane, a konflikty zawartości
 są zgłaszane i nie są nadpisywane.
 
 Parser grupuje pliki Game (Disk 1 of 2).adf i
 Game (Disk 2 of 2).adf jako jeden zestaw, a numeracja w eksporcie nie
 zależy od tego, które dyski są aktualnie obecne. Format markerów wejściowych
-jest zgodny z [TOSEC Naming Convention](https://www.tosecdev.org/tosec-naming-convention),
-natomiast nazwy wyjściowe pozostają w konwencji `Game-1`, `Game-2` ... `Game-n`.
+i wyjściowych jest zgodny z [TOSEC Naming Convention](https://www.tosecdev.org/tosec-naming-convention).
+Jeżeli marker `(Disk n of m)` deklaruje zestaw niekompletny, cała grupa jest
+kwarantannowana: log podaje oczekiwany zakres oraz brakujące dyski, a eksport
+nie tworzy ani częściowych obrazów, ani artworku. Zasada działa jednakowo dla
+`Games` i `Demoscene`.
 
 Jeżeli obrazy znajdują się we wspólnym podkatalogu, podkatalog jest granicą
 jednej gry — jego zawartość nie jest dzielona według wariantów nazw. Dotyczy to
 również nazw `Atlantis - 01.adf` ... `Atlantis - 11.adf`: eksport trafia do
-jednego katalogu `Atlantis` i używa nazw `Atlantis-1.adf` ...
-`Atlantis-11.adf`. `Atlantis - Save.adf` pozostaje osobnym obrazem
-`Atlantis-Save.adf` w tym samym katalogu, po obrazach dysków. Numery dysków są
+jednego katalogu `Atlantis` i używa nazw `Atlantis (Disk 1 of 11).adf` ...
+`Atlantis (Disk 11 of 11).adf`. `Atlantis - Save.adf` pozostaje osobnym obrazem
+`Atlantis (Save Disk).adf` w tym samym katalogu, po obrazach dysków. Numery dysków są
 odczytywane z nazwy (w tym z markerów TOSEC `(Disk n of m)`) i nie są zgadywane
 na podstawie kolejności plików.
 
@@ -444,10 +474,10 @@ zainstalowanego runtime .NET (zawierają go w pliku wykonywalnym).
 
 ## Wydania GitHub i pliki bez runtime
 
-Workflow `.github/workflows/release.yml` uruchamia się po opublikowaniu GitHub
-Release albo wypchnięciu taga `v*` (np. `v1.1.1`). Dla każdego wydania buduje
-główne CLI/GUI oraz CLI/GUI demosceny jako self-contained, single-file i
-dołącza je do tego Release.
+Workflow `.github/workflows/release.yml` uruchamia się wyłącznie po opublikowaniu
+GitHub Release dla taga `v*` (np. `v1.1.1`). Zwykłe commity i push do gałęzi nie
+uruchamiają tego workflow. Dla każdego wydania buduje główne CLI/GUI oraz
+CLI/GUI demosceny jako self-contained, single-file i dołącza je do tego Release.
 Używane są desktopowe identyfikatory RID z [katalogu RID .NET](https://learn.microsoft.com/en-us/dotnet/core/rid-catalog):
 `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64` i `osx-arm64`.
 
@@ -461,19 +491,21 @@ ami-gotek-media-builder-demoscene-gui-v1.1.1-win-x64.zip
 ~~~
 
 Analogiczne pliki są tworzone dla pozostałych RID-ów. ZIP zawiera gotowy
-program (`AmiGotekMediaBuilder.Cli`, `AmiGotekMediaBuilder.Gui` albo program demoscenowy), więc na komputerze docelowym nie
-trzeba instalować .NET. Tag musi zaczynać się od `v`, a token workflowa ma
-uprawnienie `contents: write`, aby załączyć assety do Release.
+program (`AmiGotekMediaBuilder.Cli`, `AmiGotekMediaBuilder.Gui` albo program
+demoscenowy), więc na komputerze docelowym nie trzeba instalować .NET. Tag musi
+zaczynać się od `v`, a token workflowa ma uprawnienie `contents: write`, aby
+załączyć assety do Release. Workflow używa wersji akcji GitHub zgodnych z
+Node.js 24.
 
-Przykładowe wydanie z taga:
+Przykładowe wydanie z taga — po wypchnięciu taga utwórz i opublikuj Release:
 
 ~~~powershell
 git tag v1.1.1
 git push origin v1.1.1
+gh release create v1.1.1 --generate-notes --title v1.1.1
 ~~~
 
-Jeżeli Release dla taga już istnieje, workflow tylko uzupełni go assetami;
-jeśli nie istnieje, utworzy go automatycznie.
+Po opublikowaniu Release workflow uruchomi się raz i dołączy do niego assety.
 
 ## Bezpieczeństwo
 

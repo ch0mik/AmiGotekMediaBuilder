@@ -338,13 +338,7 @@ public sealed class HybridMetadataEnricher(
                 {
                     progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
                         "artwork", record.ArtworkProvider ?? record.Provider));
-                    if (string.Equals(record.ArtworkProvider, DefaultArtworkService.ProviderId,
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        artifact = DefaultArtworkService.Ensure(
-                            group, artworkOriginalDirectory, artworkProcessedDirectory);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(record.ArtworkUrl) ||
+                    if (!string.IsNullOrWhiteSpace(record.ArtworkUrl) ||
                              !string.IsNullOrWhiteSpace(record.ArtworkPath))
                     {
                         artifact = await artwork.DownloadAsync(
@@ -361,36 +355,14 @@ public sealed class HybridMetadataEnricher(
                         ex.GetBaseException().Message));
                 }
 
-                // Every game receives a local thumbnail, even when all public
-                // providers miss, rate-limit, or return metadata without an
-                // image. This is deliberately never applied to demoscene data.
+                // Do not create an artwork-cache fallback when providers miss.
+                // The exporter writes its diskette image only into output so
+                // subsequent online runs retry artwork discovery.
                 if (artifact is null)
                 {
-                    try
-                    {
-                        artifact = DefaultArtworkService.Ensure(
-                            group, artworkOriginalDirectory, artworkProcessedDirectory);
-                        if (artifact is not null)
-                        {
-                            ArtworkFallbackUsed++;
-                            record = record with
-                            {
-                                ArtworkUrl = null,
-                                ArtworkPath = artifact.OriginalPath,
-                                ArtworkSourceUrl = artifact.Url,
-                                ArtworkProvider = DefaultArtworkService.ProviderId
-                            };
-                            progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
-                                "artwork", DefaultArtworkService.ProviderId));
-                        }
-                    }
-                    catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        ArtworkFailed++;
-                        progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
-                            "fallback-error", DefaultArtworkService.ProviderId,
-                            ex.GetBaseException().Message));
-                    }
+                    record = record with { ArtworkPath = null, ArtworkSourceUrl = null,
+                        ArtworkProvider = string.Equals(record.ArtworkProvider, DefaultArtworkService.ProviderId,
+                            StringComparison.OrdinalIgnoreCase) ? null : record.ArtworkProvider };
                 }
             }
 

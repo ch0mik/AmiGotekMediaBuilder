@@ -120,6 +120,30 @@ public sealed class DemozooCatalogProvider : IDisposable
         return DemozooHtmlParser.ParseProduction(bytes, source, demozooId!);
     }
 
+    /// <summary>Finds production IDs through Demozoo's public live-search endpoint.</summary>
+    public async Task<IReadOnlyList<DemosceneProduction>> SearchAsync(
+        string query, int maxItems = 12, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return [];
+        var url = new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"),
+            "search/live/?q=" + Uri.EscapeDataString(query.Trim()) + "&category=").ToString();
+        var bytes = await _client.GetBytesAsync(url, _options.MaxResponseBytes, cancellationToken);
+        var text = Encoding.UTF8.GetString(bytes);
+        var ids = Regex.Matches(text, @"(?:productions\\?/|productions/)(?<id>\d+)")
+            .Select(match => match.Groups["id"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .Take(Math.Clamp(maxItems, 1, 50))
+            .ToArray();
+        var results = new List<DemosceneProduction>();
+        foreach (var id in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var production = await GetProductionAsync(id, cancellationToken);
+            if (production is not null) results.Add(production);
+        }
+        return results;
+    }
+
     public static IReadOnlyList<DemosceneProduction> ParseListPage(byte[] bytes, string sourceUrl) =>
         DemozooHtmlParser.ParseListPage(bytes, sourceUrl);
 

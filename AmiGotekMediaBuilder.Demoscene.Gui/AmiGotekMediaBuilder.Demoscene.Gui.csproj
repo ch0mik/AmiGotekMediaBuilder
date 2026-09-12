@@ -11,6 +11,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <!--
+      Avalonia's build-time telemetry task writes to the user's global
+      AvaloniaUI folder.  Keep this project buildable in restricted/CI
+      environments (and avoid collecting telemetry for this open-source app).
+      An empty value prevents the AvaloniaStats target from running.
+    -->
+    <UsedAvaloniaProducts></UsedAvaloniaProducts>
   </PropertyGroup>
 
   <ItemGroup>

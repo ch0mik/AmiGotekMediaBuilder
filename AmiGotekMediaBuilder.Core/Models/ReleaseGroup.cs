@@ -26,8 +26,8 @@ public sealed class ReleaseGroup
     public string? QuarantineReason { get; set; }
     public string? Folder { get; set; }
     /// <summary>
-    /// Export uses simple sequential names (Game-1.adf, Game-2.adf,
-    /// Game-Save.adf) while retaining TOSEC parsing data.
+    /// Retained for source-grouping compatibility with dash-numbered sets.
+    /// Export uses canonical TOSEC disk markers.
     /// </summary>
     public bool UseSequentialDiskNames { get; set; }
     /// <summary>True when all records belong to the dedicated demoscene intake.</summary>

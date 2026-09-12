@@ -10,6 +10,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Keep local and CI builds independent of Avalonia's global telemetry log. -->
+    <UsedAvaloniaProducts></UsedAvaloniaProducts>
   </PropertyGroup>
 
   <ItemGroup>

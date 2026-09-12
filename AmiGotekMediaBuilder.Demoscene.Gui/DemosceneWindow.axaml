@@ -2,18 +2,48 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="AmiGotekMediaBuilder.Demoscene.Gui.DemosceneWindow"
         Title="AmiGotekMediaBuilder Demoscene — Pouët + Demozoo"
-        Width="1100" Height="700"
-        MinWidth="820" MinHeight="520"
+        Width="1320" Height="780"
+        MinWidth="1200" MinHeight="520"
         FontSize="16">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,52,120" Margin="14" RowSpacing="8">
     <Border BorderBrush="{DynamicResource MatrixBorderBrush}" BorderThickness="1" Padding="8">
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-        <TextBox x:Name="LibraryRootText" Watermark="Library root" />
-        <Button Grid.Column="1" Content="Browse…" Width="100" Click="BrowseRoot" />
+      <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+        <TextBlock Text="Export settings (shared)" FontWeight="SemiBold" />
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBox x:Name="ExportDirectoryText" Watermark="Gotek export directory — ADF\\Demoscene and DSK\\Demoscene" TextChanged="PathChanged" />
+          <Button Grid.Column="1" Content="Choose" Width="100" Click="BrowseExportDirectory" />
+        </Grid>
+        <WrapPanel Grid.Row="2" Orientation="Horizontal" ItemSpacing="8">
+          <TextBlock Text="GTi screen" VerticalAlignment="Center" />
+          <ComboBox x:Name="ScreenCombo" Width="500" SelectedIndex="0" SelectionChanged="ScreenChanged">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding DisplayName}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </WrapPanel>
       </Grid>
     </Border>
     <Border Grid.Row="1" BorderBrush="{DynamicResource MatrixBorderBrush}" BorderThickness="1" Padding="8">
-      <WrapPanel Orientation="Horizontal" ItemSpacing="8">
+      <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBlock Text="Local library" FontWeight="SemiBold" />
+          <TextBlock x:Name="LocalCountText" Grid.Column="1" Foreground="{DynamicResource MatrixMutedBrush}" VerticalAlignment="Center" />
+        </Grid>
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+          <TextBox x:Name="LibraryRootText" Watermark="Source folder with existing ADF/DSK/ZIP files" TextChanged="PathChanged" />
+          <Button Grid.Column="1" Content="Choose" Width="100" Click="BrowseRoot" />
+          <Button Grid.Column="2" Content="Scan" Width="85" Click="ScanLibraryClick" />
+          <Button x:Name="ExportScannedButton" Grid.Column="3" Content="Export" Width="95" IsEnabled="False" Click="ExportScannedClick" />
+        </Grid>
+        <TextBlock x:Name="LocalStatusText" Grid.Row="2" Foreground="{DynamicResource MatrixMutedBrush}" TextWrapping="Wrap" />
+      </Grid>
+    </Border>
+    <Border Grid.Row="2" BorderBrush="{DynamicResource MatrixBorderBrush}" BorderThickness="1" Padding="8">
+      <Grid RowDefinitions="Auto,Auto" RowSpacing="6">
+        <TextBlock Text="Online catalog — Pouët + Demozoo" FontWeight="SemiBold" />
+        <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemSpacing="8">
         <TextBlock Text="Platform" VerticalAlignment="Center" />
         <ComboBox x:Name="PlatformCombo" Width="150" SelectedIndex="0">
           <ComboBoxItem Tag="all">All Amiga</ComboBoxItem>
@@ -21,30 +51,17 @@
           <ComboBoxItem Tag="aga">AGA</ComboBoxItem>
           <ComboBoxItem Tag="ppc-rtg">PPC/RTG</ComboBoxItem>
         </ComboBox>
-        <TextBlock Text="Screen" VerticalAlignment="Center" />
-        <ComboBox x:Name="ScreenCombo" Width="360" SelectedIndex="0" SelectionChanged="ScreenChanged">
-          <ComboBox.ItemTemplate>
-            <DataTemplate>
-              <TextBlock Text="{Binding DisplayName}" />
-            </DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
-        <TextBlock Text="Type" VerticalAlignment="Center" />
-        <TextBox x:Name="TypeText" Text="demo" Width="90" />
         <TextBlock Text="Search" VerticalAlignment="Center" />
         <TextBox x:Name="SearchText" Width="160" />
         <TextBlock Text="Max items" VerticalAlignment="Center" />
         <TextBox x:Name="MaxItemsText" Text="50" Width="55" />
-        <Button Content="Search all catalogs" Width="145" Click="SearchClick" />
-      </WrapPanel>
+        <Button Content="Search" Width="95" Click="SearchClick" />
+        <Button Content="Download" Width="115" Click="DownloadSelectedClick" />
+        <Button Content="Download all" Width="175" Click="DownloadAllClick" />
+        <TextBlock x:Name="OnlineCountText" Foreground="{DynamicResource MatrixMutedBrush}" VerticalAlignment="Center" />
+        </WrapPanel>
+      </Grid>
     </Border>
-    <WrapPanel Grid.Row="2" Orientation="Horizontal" ItemSpacing="8">
-      <Button Content="Download selected" Width="135" Click="DownloadSelectedClick" />
-      <Button Content="Download all displayed" Width="155" Click="DownloadAllClick" />
-      <Button x:Name="CancelButton" Content="Cancel" Width="70" IsEnabled="False" Click="CancelClick" />
-      <CheckBox x:Name="DownloadAcknowledged" Content="I acknowledge external downloads" VerticalContentAlignment="Center" />
-      <TextBlock x:Name="CountText" Foreground="{DynamicResource MatrixMutedBrush}" VerticalAlignment="Center" />
-    </WrapPanel>
     <ListBox x:Name="ProductionsList" Grid.Row="3" SelectionMode="Multiple">
       <ListBox.ItemTemplate>
         <DataTemplate>
@@ -65,10 +82,11 @@
         </DataTemplate>
       </ListBox.ItemTemplate>
     </ListBox>
-    <StackPanel Grid.Row="4" Spacing="4">
+    <Grid Grid.Row="4" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="4" ColumnSpacing="10">
       <ProgressBar x:Name="OperationProgress" Minimum="0" Maximum="100" Value="0" Height="12" />
-      <TextBlock x:Name="StatusText" Foreground="{DynamicResource MatrixMutedBrush}" TextWrapping="Wrap" />
-    </StackPanel>
+      <Button x:Name="CancelButton" Grid.Column="1" Content="Cancel" Width="120" IsEnabled="False" Click="CancelClick" />
+      <TextBlock x:Name="StatusText" Grid.Row="1" Grid.ColumnSpan="2" Foreground="{DynamicResource MatrixMutedBrush}" TextWrapping="Wrap" />
+    </Grid>
     <TextBox x:Name="CurrentActivityText" Grid.Row="5" IsReadOnly="True" AcceptsReturn="True"
              TextWrapping="Wrap" Watermark="Current activity" />
     <TextBox x:Name="LogText" Grid.Row="6" IsReadOnly="True" AcceptsReturn="True"

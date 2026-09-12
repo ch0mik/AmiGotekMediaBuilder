@@ -21,12 +21,9 @@ public static class ReleaseNamer
     }
 
     /// <summary>
-    /// Returns the compact Gotek filename for one image in a release set.
-    ///
-    /// TOSEC markers are accepted on input for grouping and disk ordering, but
-    /// are never copied to exported filenames. Main disks use Game-1.adf,
-    /// Game-2.adf and so on; special disks use a role suffix such as
-    /// Game-Save.adf.
+    /// Returns the canonical TOSEC filename for one image in a release set.
+    /// The GTi recognises TOSEC disk markers, so keep them in the exported
+    /// library instead of flattening images to the legacy Game-1 convention.
     /// </summary>
     public static string GetDiskFilename(ReleaseGroup group, ParsedRecord disk, int ordinal, int setCount)
     {
@@ -38,17 +35,15 @@ public static class ReleaseNamer
         var basename = GetBasename(group);
         var extension = CleanExtension(disk.Extension, group.Extension);
 
-        // Always use the compact output convention. TOSEC fields remain
-        // available on ParsedRecord and are used above for ordering/identity,
-        // but the marker itself is intentionally not emitted.
         if (disk.SpecialDisk && !string.IsNullOrWhiteSpace(disk.SpecialRole))
         {
-            basename = $"{basename}-{CanonicalSpecialRole(disk.SpecialRole)}";
+            basename = $"{basename} ({CanonicalSpecialRole(disk.SpecialRole)} Disk)";
         }
         else
         {
-            var number = disk.DiskNumber.GetValueOrDefault(ordinal + 1);
-            basename = $"{basename}-{number}";
+            var marker = GetDiskMarker(group, disk, ordinal, setCount);
+            if (marker is not null)
+                basename += $" {marker}";
         }
         return Sanitize($"{basename}.{extension}");
     }
@@ -70,6 +65,8 @@ public static class ReleaseNamer
             .Max();
         if (declaredTotal <= 1 && disk.TotalDisks is > 1)
             declaredTotal = disk.TotalDisks.Value;
+        if (declaredTotal <= 1 && group.Disks.Count > 1)
+            declaredTotal = group.Disks.Count;
         if (declaredTotal <= 1) return null;
 
         var number = disk.DiskNumber.GetValueOrDefault(ordinal + 1);
@@ -124,6 +121,11 @@ public static class ReleaseNamer
         var builder = new StringBuilder(value.Length);
         foreach (var character in value)
             builder.Append(char.IsLetterOrDigit(character) || character is ' ' or '.' or '-' or '[' or ']' or '(' or ')' ? character : '_');
-        return builder.ToString().Trim().Replace("  ", " ");
+        // Windows trims trailing dots from directory components, while later
+        // file operations still receive the original component. Remove them
+        // here so a TOSEC title such as "Gettin' Tired of..." has one stable
+        // path on every platform.
+        var sanitized = builder.ToString().Trim().TrimEnd('.', ' ').Replace("  ", " ");
+        return sanitized.Length == 0 ? "Unknown" : sanitized;
     }
 }

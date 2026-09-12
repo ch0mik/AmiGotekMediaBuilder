@@ -29,7 +29,15 @@ public static class DemosceneCatalogMerger
                 merged[index] = MergePair(merged[index], production);
             }
         }
-        return merged;
+        // Catalogues normally return newest entries first, but their order is
+        // not guaranteed and the two providers are fetched independently.
+        // Apply one deterministic newest-first order after deduplication.
+        return merged
+            .OrderByDescending(production => ReleaseYear(production.Year))
+            .ThenBy(production => production.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(production => production.Catalog, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(production => production.PouetId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static DemosceneProduction MergePair(
@@ -79,4 +87,7 @@ public static class DemosceneCatalogMerger
             .Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant)
             .ToArray());
+
+    private static int ReleaseYear(string? value) =>
+        int.TryParse(value, out var year) ? year : int.MinValue;
 }

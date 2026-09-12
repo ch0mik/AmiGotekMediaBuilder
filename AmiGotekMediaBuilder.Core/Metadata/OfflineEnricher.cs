@@ -44,27 +44,14 @@ public sealed class OfflineEnricher(IMetadataProvider? provider = null)
             if (!group.IsDemoscene && group.Folder is not null && IsLegacyDirectoryTitle(record))
                 record = record with { Title = group.Title ?? group.Folder };
 
-            ArtworkArtifact? defaultArtwork = null;
-            if (!group.IsDemoscene && artworkOriginalDirectory is not null && artworkProcessedDirectory is not null &&
-                !HasManagedArtwork(group, record, artworkOriginalDirectory, artworkProcessedDirectory))
-            {
-                defaultArtwork = DefaultArtworkService.Ensure(
-                    group, artworkOriginalDirectory, artworkProcessedDirectory);
-                if (defaultArtwork is not null)
-                {
-                    ArtworkFallbackUsed++;
-                    record = record with
-                    {
-                        ArtworkPath = defaultArtwork.OriginalPath,
-                        ArtworkProvider = DefaultArtworkService.ProviderId,
-                        ArtworkSourceUrl = defaultArtwork.Url
-                    };
-                }
-            }
+            // Missing artwork remains absent from working directories. The
+            // exporter writes its diskette fallback only at export time, so a
+            // later online run can retry artwork discovery.
+            if (string.Equals(record.ArtworkProvider, DefaultArtworkService.ProviderId,
+                    StringComparison.OrdinalIgnoreCase))
+                record = record with { ArtworkPath = null, ArtworkProvider = null, ArtworkSourceUrl = null };
             cache.Write(record);
             catalog?.WriteMetadata(group, record, CatalogNamespace.For(group));
-            if (defaultArtwork is not null)
-                catalog?.WriteArtwork(group, defaultArtwork, CatalogNamespace.For(group));
             results.Add(record);
             if (nfoDirectory is not null)
             {

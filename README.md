@@ -241,6 +241,33 @@ The independent Avalonia GUI is started with:
 dotnet run --project AmiGotekMediaBuilder.Demoscene.Gui
 ```
 
+The GUI separates local intake from online discovery. `Library source` is
+optional: use **Scan library** to find existing ADF/DSK files, then **Export scanned**
+to copy them into the selected export directory. Local export also matches
+release titles against the demoscene catalog and scrapes available artwork
+before copying it. Pouët/Demozoo search works
+without a library source; metadata and thumbnails use the application's local
+cache. Select an `Export directory` before downloading or exporting. Both paths
+write a GTi-ready layout with canonical TOSEC filenames:
+
+```text
+<export-directory>\ADF\Demoscene\<Release>\<TOSEC disk name>.adf
+<export-directory>\DSK\Demoscene\<Release>\<TOSEC disk name>.dsk
+```
+
+For example, a multi-disk download can be named
+`Example Demo (Disk 1 of 2)(Data).adf`. The cached demoscene thumbnail is copied beside the
+disk image under the release-folder name (for example `Example Demo.jpg`).
+When no provider artwork is available, the embedded diskette image is written
+only beside the exported release; it is never stored in artwork caches, so a
+later run retries online discovery.
+
+Requests run without an artificial delay until a host signals overload. HTTP
+`429` obeys `Retry-After` when supplied; `429`, transient 5xx responses, and
+connection failures activate a shared per-host cooldown and retry up to five
+times with exponential backoff. The GUI reports the next retry rather than
+aborting the export.
+
 ## Gotek export
 
 Export requires explicit gate acknowledgement and verified artwork dimensions:
@@ -255,18 +282,24 @@ dotnet run --project AmiGotekMediaBuilder.Cli -- export `
 ```
 
 Add `--online` to download artwork during the same operation. Output is written
-below `<library_root>\work\staging\<run-id>\`, under `ADF` or `DSK`.
+below `<library_root>\work\staging\<run-id>\`, under `ADF` or `DSK`, then
+the `Games` (default) or `Demoscene` category.
 
-Multi-disk output uses simple names `<Release>-1` through `<Release>-n`.
-TOSEC markers such as `(Disk 2 of 2)(Data)` are used for grouping and numbering
-but are not copied to output names. Special images keep their role, for example
-`<Release>-Save.adf`; a single unnumbered image becomes `<Release>-1.adf` or
-`<Release>-1.dsk`. NFO and artwork are copied beside the disk images.
+Output preserves canonical TOSEC markers: a multi-disk release uses
+`<Release> (Disk 1 of n).adf` through `<Release> (Disk n of n).adf`; a media
+label such as `(Data)` is retained. Special images use e.g.
+`<Release> (Save Disk).adf`, while a single unnumbered image remains
+`<Release>.adf` or `<Release>.dsk`. NFO, artwork, and an optional manual from
+`assets\rtfm\<Release>.rtfm` are copied beside the disk images.
+
+When TOSEC markers declare a multi-disk set but one or more disks are missing,
+the whole release is quarantined. The log identifies the expected range and
+missing disks; no partial disk set or artwork is exported. This applies to both
+`Games` and `Demoscene`.
 
 Files in one shared input subdirectory are one game. Thus
-`Atlantis - 01.adf` through `Atlantis - 11.adf` become
-`Atlantis-1.adf` through `Atlantis-11.adf`, while `Atlantis - Save.adf` becomes
-`Atlantis-Save.adf` in the same directory. See the
+`Atlantis - 01.adf` through `Atlantis - 11.adf` become TOSEC-named images in
+the same `Atlantis` directory. See the
 [TOSEC Naming Convention](https://www.tosecdev.org/tosec-naming-convention).
 
 Use `--verify-only` to validate without writing new files.

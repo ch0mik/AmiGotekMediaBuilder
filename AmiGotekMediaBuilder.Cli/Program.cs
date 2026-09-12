@@ -136,7 +136,8 @@ static Task<int> MainAsync(string[] args)
             var exported = GotekExporter.Export(
                 groups, config.OriginalDirectory, config.StagingDirectory, runId,
                 acknowledged, width, height, options.ContainsKey("verify-only"),
-                config.NfoDirectory, config.ArtworkProcessedDirectory, config.ArtworkOriginalDirectory);
+                config.NfoDirectory, config.ArtworkProcessedDirectory, config.ArtworkOriginalDirectory,
+                rtfmDirectory: config.RtfmDirectory);
             if (options.ContainsKey("json"))
                 Console.WriteLine(JsonSerializer.Serialize(exported, new JsonSerializerOptions { WriteIndented = true }));
             else

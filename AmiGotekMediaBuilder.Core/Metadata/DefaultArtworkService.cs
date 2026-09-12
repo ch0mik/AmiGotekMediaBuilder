@@ -19,6 +19,13 @@ public static class DefaultArtworkService
     public const string ResourceName = "default-game-artwork.jpg";
     private static readonly Lazy<byte[]> EmbeddedBytes = new(ReadResource);
 
+    /// <summary>
+    /// Returns the embedded diskette fallback for a caller that writes only
+    /// an export companion. Unlike <see cref="Ensure"/>, this never creates
+    /// artwork-cache files or provenance sidecars.
+    /// </summary>
+    public static byte[] GetExportFallbackBytes() => EmbeddedBytes.Value.ToArray();
+
     public static ArtworkArtifact? Ensure(
         ReleaseGroup group,
         string originalDirectory,

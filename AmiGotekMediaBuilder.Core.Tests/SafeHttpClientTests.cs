@@ -29,6 +29,21 @@ public sealed class SafeHttpClientTests
         Assert.Equal(new byte[] { 1, 2, 3 }, bytes);
     }
 
+    [Fact]
+    public async Task RetriesTransientServerFailureBeforeReturningPayload()
+    {
+        var progress = new List<HttpRetryProgress>();
+        using var client = new SafeHttpClient(handler: new TransientFailureHandler(),
+            retryProgress: new Progress<HttpRetryProgress>(progress.Add));
+
+        var bytes = await client.GetBytesAsync("https://retry.example.test/data");
+
+        Assert.Equal([7, 8, 9], bytes);
+        var retry = Assert.Single(progress);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, retry.StatusCode);
+        Assert.Equal(1, retry.Attempt);
+    }
+
     private sealed class StaticHandler(byte[] payload) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -51,6 +66,19 @@ public sealed class SafeHttpClientTests
             {
                 Content = new ByteArrayContent([1, 2, 3])
             });
+        }
+    }
+
+    private sealed class TransientFailureHandler : HttpMessageHandler
+    {
+        private int _requests;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = Interlocked.Increment(ref _requests) == 1
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([7, 8, 9]) };
+            return Task.FromResult(response);
         }
     }
 }
