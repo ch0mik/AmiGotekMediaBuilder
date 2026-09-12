@@ -85,6 +85,7 @@ public sealed class GotekExporterTests
             var output = Path.Combine(result.StagingRoot, "DSK", "Demoscene", "Scene");
             Assert.True(File.Exists(Path.Combine(output, "Scene.dsk")));
             Assert.True(File.Exists(Path.Combine(output, "Scene.nfo")));
+            Assert.False(File.Exists(Path.Combine(output, "Scene.jpg")));
         }
         finally
         {

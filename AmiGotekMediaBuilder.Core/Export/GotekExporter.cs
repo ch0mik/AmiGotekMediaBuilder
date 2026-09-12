@@ -116,7 +116,7 @@ public static partial class GotekExporter
                 FindArtwork(basename, artworkOriginalDirectory, artworkOriginalDirectory);
             if (artwork is not null)
                 WriteBytes(File.ReadAllBytes(artwork), Path.Combine(folder, Path.GetFileName(artwork)), verifyOnly, result);
-            else
+            else if (!group.IsDemoscene)
                 WriteBytes(DefaultArtworkService.GetExportFallbackBytes(), Path.Combine(folder, $"{basename}.jpg"), verifyOnly, result);
             result.ReleasesExported++;
         }
