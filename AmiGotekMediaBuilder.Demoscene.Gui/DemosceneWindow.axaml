@@ -42,7 +42,7 @@
     </Border>
     <Border Grid.Row="2" BorderBrush="{DynamicResource MatrixBorderBrush}" BorderThickness="1" Padding="8">
       <Grid RowDefinitions="Auto,Auto" RowSpacing="6">
-        <TextBlock Text="Online catalog — Pouët + Demozoo" FontWeight="SemiBold" />
+        <TextBlock Text="Online catalog — Pouët + scene.org + Demozoo" FontWeight="SemiBold" />
         <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemSpacing="8">
         <TextBlock Text="Platform" VerticalAlignment="Center" />
         <ComboBox x:Name="PlatformCombo" Width="150" SelectedIndex="0">

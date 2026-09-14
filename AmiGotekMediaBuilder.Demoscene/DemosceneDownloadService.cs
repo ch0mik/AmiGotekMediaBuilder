@@ -9,8 +9,9 @@ namespace AmiGotekMediaBuilder.Demoscene;
 /// <summary>
 /// Downloads disk images referenced by demoscene productions. Only ADF/DSK
 /// payloads (including ZIP/GZip containers) are written; arbitrary links are
-/// reported as skipped. Every output has a provenance sidecar and is written
-/// atomically so an interrupted batch can safely be resumed.
+/// reported as skipped. Provenance is stored outside GTI media folders and
+/// every output is written atomically so an interrupted batch can safely be
+/// resumed.
 /// </summary>
 public sealed class DemosceneDownloadService : IDisposable
 {
@@ -48,6 +49,10 @@ public sealed class DemosceneDownloadService : IDisposable
             await gate.WaitAsync(cancellationToken);
             try
             {
+                var started = Volatile.Read(ref completed);
+                progress?.Report(new DemosceneDownloadProgress(started, items.Length, item.Production,
+                    Result(item, DemosceneDownloadStatus.Skipped, null, null, 0, null, item.Link.Format),
+                    IsStarting: true));
                 if (normalized.RequestDelayMilliseconds > 0)
                     await Task.Delay(normalized.RequestDelayMilliseconds, cancellationToken);
                 var downloaded = await DownloadItemAsync(item, normalized, byteCounter, knownHashes, manifestLock, cancellationToken);
@@ -92,7 +97,7 @@ public sealed class DemosceneDownloadService : IDisposable
         SemaphoreSlim manifestLock,
         CancellationToken cancellationToken)
     {
-        var link = item.Link;
+        var link = item.Link with { Url = NormalizeDownloadUrl(item.Link.Url) };
         if (!Uri.TryCreate(link.Url, UriKind.Absolute, out var linkUri) ||
             linkUri.Scheme is not ("http" or "https"))
             return [Result(item, DemosceneDownloadStatus.Skipped, null,
@@ -160,8 +165,16 @@ public sealed class DemosceneDownloadService : IDisposable
         DemosceneProduction production,
         DemosceneDownloadOptions options)
     {
-        var links = production.Downloads
+        var availableLinks = production.Downloads
             .Where(l => !string.IsNullOrWhiteSpace(l.Url))
+            .ToArray();
+        // A production page often has "mirrors" and unrelated external
+        // links next to a real archive. Prefer only known disk/archive links;
+        // retain unknown links solely when they are the only available lead.
+        var supportedLinks = availableLinks.Where(link =>
+            link.Format is DemosceneAssetFormat.Adf or DemosceneAssetFormat.Dsk ||
+            options.IncludeArchives && link.Format is DemosceneAssetFormat.Zip or DemosceneAssetFormat.Gzip).ToArray();
+        var links = (supportedLinks.Length > 0 ? supportedLinks : availableLinks)
             .Take(options.MaxLinksPerProduction)
             .ToArray();
         var platform = PrimaryPlatform(production.Platforms);
@@ -172,7 +185,18 @@ public sealed class DemosceneDownloadService : IDisposable
                 platform);
             yield break;
         }
-        foreach (var link in links) yield return new WorkItem(production, link, platform);
+        var inferredTotal = links.Length > 1 ? links.Length : (int?)null;
+        foreach (var pair in links.Select((link, index) => new { link, index }))
+        {
+            var marker = ParseDiskMarker(pair.link.FileName ?? pair.link.Label ?? string.Empty);
+            var diskNumber = pair.link.DiskNumber ?? marker.Number ?? (inferredTotal is null ? null : pair.index + 1);
+            var totalDisks = pair.link.TotalDisks ?? marker.Total ?? inferredTotal;
+            yield return new WorkItem(production, pair.link with
+            {
+                DiskNumber = diskNumber,
+                TotalDisks = totalDisks
+            }, platform);
+        }
     }
 
     private static bool IsSupported(DemosceneDownloadLink link, bool includeArchives)
@@ -180,6 +204,19 @@ public sealed class DemosceneDownloadService : IDisposable
         if (link.Format is DemosceneAssetFormat.Adf or DemosceneAssetFormat.Dsk) return true;
         if (link.Format is DemosceneAssetFormat.Zip or DemosceneAssetFormat.Gzip) return includeArchives;
         return link.Format == DemosceneAssetFormat.Unknown && !string.IsNullOrWhiteSpace(link.Label);
+    }
+
+    private static string NormalizeDownloadUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            !uri.Host.Equals("files.scene.org", StringComparison.OrdinalIgnoreCase) ||
+            !uri.AbsolutePath.StartsWith("/view/", StringComparison.OrdinalIgnoreCase))
+            return url;
+        var builder = new UriBuilder(uri)
+        {
+            Path = "/get/" + uri.AbsolutePath[6..].TrimStart('/')
+        };
+        return builder.Uri.ToString();
     }
 
     private static List<ExtractedImage> Expand(
@@ -235,7 +272,7 @@ public sealed class DemosceneDownloadService : IDisposable
                 }
                 break;
         }
-        return output;
+        return NormalizeDiskSet(output);
     }
 
     private static DemosceneAssetFormat InferFormat(byte[] payload, DemosceneDownloadLink link)
@@ -281,8 +318,7 @@ public sealed class DemosceneDownloadService : IDisposable
         SemaphoreSlim manifestLock,
         CancellationToken cancellationToken)
     {
-        var baseName = TosecFileStem(image.FileName, image.DiskNumber, image.TotalDisks);
-        if (string.IsNullOrWhiteSpace(baseName)) baseName = SafeSlug(production.Title);
+        var baseName = TosecFileStem(production, image.DiskNumber, image.TotalDisks);
         var extension = image.Format == DemosceneAssetFormat.Dsk ? ".dsk" : ".adf";
         var folder = gotekExportLayout
             ? Path.Combine(root, extension.Equals(".dsk", StringComparison.OrdinalIgnoreCase) ? "DSK" : "ADF",
@@ -326,7 +362,9 @@ public sealed class DemosceneDownloadService : IDisposable
                 format = image.Format.ToString().ToLowerInvariant()
             };
             var json = JsonSerializer.Serialize(sidecar, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(target.Path + ".source.json", json, cancellationToken);
+            var metadataDirectory = Path.Combine(root, ".metadata");
+            Directory.CreateDirectory(metadataDirectory);
+            await File.WriteAllTextAsync(Path.Combine(metadataDirectory, sha256 + ".source.json"), json, cancellationToken);
             await manifestLock.WaitAsync(cancellationToken);
             try
             {
@@ -420,33 +458,13 @@ public sealed class DemosceneDownloadService : IDisposable
         return SafeSlug(stem) + extension;
     }
 
-    private static string TosecFileStem(string fileName, int? diskNumber, int? totalDisks)
+    private static string TosecFileStem(DemosceneProduction production, int? diskNumber, int? totalDisks)
     {
-        var stem = Path.GetFileNameWithoutExtension(fileName);
-        var marker = System.Text.RegularExpressions.Regex.Match(
-            stem,
-            @"\(Disk\s+(?<number>\d+)\s+of\s+(?<total>\d+)\)",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        var number = diskNumber;
-        var total = totalDisks;
-        if (marker.Success)
-        {
-            var markedNumber = int.TryParse(marker.Groups["number"].Value, out var parsedNumber) ? parsedNumber : (int?)null;
-            var markedTotal = int.TryParse(marker.Groups["total"].Value, out var parsedTotal) ? parsedTotal : (int?)null;
-            number = markedNumber ?? number;
-            total = markedTotal ?? total;
-            if (number is { } canonicalNumber && total is { } canonicalTotal &&
-                canonicalTotal > 1 && canonicalNumber >= 1 && canonicalNumber <= canonicalTotal)
-            {
-                var canonicalWidth = canonicalTotal >= 10 ? Math.Max(2, canonicalTotal.ToString().Length) : 1;
-                var canonical = $"(Disk {canonicalNumber.ToString($"D{canonicalWidth}")} of {canonicalTotal.ToString($"D{canonicalWidth}")})";
-                stem = stem.Remove(marker.Index, marker.Length).Insert(marker.Index, canonical);
-                return SafeSlug(stem);
-            }
-            stem = stem.Remove(marker.Index, marker.Length).TrimEnd(' ', '_', '-');
-        }
-        var baseName = SafeSlug(stem);
-        if (number is not { } disk || total is not { } count || count <= 1 || disk < 1 || disk > count)
+        var parts = new List<string> { SafeSlug(production.Title) };
+        if (!string.IsNullOrWhiteSpace(production.Year)) parts.Add($"({SafeSlug(production.Year)})");
+        if (!string.IsNullOrWhiteSpace(production.Group)) parts.Add($"({SafeSlug(production.Group)})");
+        var baseName = string.Concat(parts);
+        if (diskNumber is not { } disk || totalDisks is not { } count || count <= 1 || disk < 1 || disk > count)
             return baseName;
         var width = count >= 10 ? Math.Max(2, count.ToString().Length) : 1;
         return $"{baseName} (Disk {disk.ToString($"D{width}")} of {count.ToString($"D{width}")})";
@@ -458,9 +476,29 @@ public sealed class DemosceneDownloadService : IDisposable
             name,
             @"\(Disk\s+(?<number>\d+)\s+of\s+(?<total>\d+)\)",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        return (
-            int.TryParse(marker.Groups["number"].Value, out var number) ? number : null,
-            int.TryParse(marker.Groups["total"].Value, out var total) ? total : null);
+        if (marker.Success)
+            return (
+                int.TryParse(marker.Groups["number"].Value, out var number) ? number : null,
+                int.TryParse(marker.Groups["total"].Value, out var total) ? total : null);
+        var numeric = System.Text.RegularExpressions.Regex.Match(name, @"(?:disk|disc)[ _-]?(?<number>\d+)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (numeric.Success && int.TryParse(numeric.Groups["number"].Value, out var numericNumber))
+            return (numericNumber, null);
+        var letter = System.Text.RegularExpressions.Regex.Match(Path.GetFileNameWithoutExtension(name), @"(?<letter>[A-Z])$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return letter.Success ? (char.ToUpperInvariant(letter.Groups["letter"].Value[0]) - 'A' + 1, null) : (null, null);
+    }
+
+    private static List<ExtractedImage> NormalizeDiskSet(List<ExtractedImage> images)
+    {
+        if (images.Count <= 1) return images;
+        var total = images.Select(image => image.TotalDisks).Where(value => value is > 1)
+            .Select(value => value!.Value).DefaultIfEmpty(images.Count).Max();
+        return images.Select((image, index) => image with
+        {
+            DiskNumber = image.DiskNumber ?? index + 1,
+            TotalDisks = image.TotalDisks ?? total
+        }).ToList();
     }
 
     private static void TryDelete(string path)

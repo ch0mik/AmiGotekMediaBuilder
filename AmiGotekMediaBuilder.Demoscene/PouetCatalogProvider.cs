@@ -38,6 +38,8 @@ public sealed class PouetCatalogProvider : IDisposable
         IProgress<DemosceneProduction>? progress = null)
     {
         var normalized = query.Normalize();
+        if (!string.IsNullOrWhiteSpace(normalized.Search))
+            return await SearchAsync(normalized, cancellationToken, progress);
         var requestedPlatforms = normalized.Platform == DemoscenePlatform.None
             ? DemoscenePlatform.OcsEcs | DemoscenePlatform.Aga | DemoscenePlatform.PpcRtg
             : normalized.Platform;
@@ -96,6 +98,63 @@ public sealed class PouetCatalogProvider : IDisposable
         return output;
     }
 
+    private async Task<IReadOnlyList<DemosceneProduction>> SearchAsync(
+        DemosceneQuery query, CancellationToken cancellationToken, IProgress<DemosceneProduction>? progress)
+    {
+        var rows = new List<DemosceneProduction>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // Pouët's prodlist.php has no text-search parameter. Its dedicated
+        // search.php endpoint searches names and groups, so use it for each
+        // meaningful word as well as the original phrase.
+        var terms = new[] { query.Search! }
+            .Concat(DemosceneQuery.SearchTerms(query.Search).OrderByDescending(term => term.Length))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var term in terms)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var url = BuildSearchUrl(term);
+            IReadOnlyList<DemosceneProduction> page;
+            try
+            {
+                page = PouetHtmlParser.ParseSearchPage(
+                    await _client.GetBytesAsync(url, _options.MaxResponseBytes, cancellationToken), url);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                continue;
+            }
+            foreach (var row in page)
+                if (seen.Add(row.PouetId)) rows.Add(row);
+
+            // A group search redirects to groups.php when it has an exact
+            // match. Parse that production table as well, so a query such as
+            // "The Black Lotus" yields the group's Amiga releases.
+            try
+            {
+                var groupUrl = BuildGroupSearchUrl(term);
+                var groupPage = await _client.GetBytesFollowingRedirectsAsync(
+                    groupUrl, _options.MaxResponseBytes, cancellationToken);
+                foreach (var row in PouetHtmlParser.ParseListPage(groupPage, groupUrl))
+                    if (seen.Add(row.PouetId)) rows.Add(row);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A term can match multiple groups; no group table is then
+                // available, while ordinary production search remains valid.
+            }
+        }
+
+        var delay = _options.RequestDelay ?? TimeSpan.FromMilliseconds(350);
+        var results = new List<DemosceneProduction>();
+        foreach (var production in await LoadDetailsBatchAsync(rows.Take(query.MaxItems * 2).ToArray(), delay, cancellationToken))
+        {
+            if (production is null || !query.Matches(production) || results.Count >= query.MaxItems) continue;
+            results.Add(production);
+            progress?.Report(production);
+        }
+        return results;
+    }
+
     public async Task<DemosceneProduction?> GetProductionAsync(
         string pouetId,
         CancellationToken cancellationToken = default)
@@ -109,6 +168,12 @@ public sealed class PouetCatalogProvider : IDisposable
 
     public static IReadOnlyList<DemosceneProduction> ParseListPage(byte[] bytes, string sourceUrl) =>
         PouetHtmlParser.ParseListPage(bytes, sourceUrl);
+
+    public static IReadOnlyList<DemosceneProduction> ParseSearchPage(byte[] bytes, string sourceUrl) =>
+        PouetHtmlParser.ParseSearchPage(bytes, sourceUrl);
+
+    public static DemosceneProduction? ParseProduction(byte[] bytes, string sourceUrl, string pouetId) =>
+        PouetHtmlParser.ParseProduction(bytes, sourceUrl, pouetId);
 
     public static DemosceneDownloadLink? ClassifyDownload(string url, string? label = null) =>
         PouetHtmlParser.ClassifyDownload(url, label);
@@ -163,11 +228,15 @@ public sealed class PouetCatalogProvider : IDisposable
         };
         if (!string.IsNullOrWhiteSpace(query.Type))
             parameters.Add($"type%5B0%5D={Uri.EscapeDataString(query.Type)}");
-        if (!string.IsNullOrWhiteSpace(query.Search))
-            parameters.Add($"search={Uri.EscapeDataString(query.Search)}");
         return new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"),
             "prodlist.php?" + string.Join('&', parameters)).ToString();
     }
+
+    private string BuildSearchUrl(string term) => new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"),
+        "search.php?what=" + Uri.EscapeDataString(term) + "&type=prod").ToString();
+
+    private string BuildGroupSearchUrl(string term) => new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"),
+        "search.php?what=" + Uri.EscapeDataString(term) + "&type=group").ToString();
 
     private string ProductionUrlForBase(string id)
     {
@@ -209,6 +278,9 @@ internal static class PouetHtmlParser
     private static readonly Regex StripRegex = new("<[^>]+>", RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex ScriptRegex = new("<(script|style)\\b.*?</\\1>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex WhitespaceRegex = new("\\s+", RegexOptions.Compiled);
+    private static readonly Regex ProductionTypeRegex = new(
+        "class=[\\\"'][^\\\"']*\\btype_(?<type>[^\\s\\\"']+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static IReadOnlyList<DemosceneProduction> ParseListPage(byte[] bytes, string sourceUrl)
     {
@@ -234,6 +306,18 @@ internal static class PouetHtmlParser
         return rows;
     }
 
+    public static IReadOnlyList<DemosceneProduction> ParseSearchPage(byte[] bytes, string sourceUrl)
+    {
+        var html = WebUtility.HtmlDecode(Encoding.UTF8.GetString(bytes));
+        return ProductionLinkRegex.Matches(html).Cast<Match>()
+            .Select(link => new DemosceneProduction(link.Groups["id"].Value,
+                Text(link.Groups["title"].Value), null, null, null, DemoscenePlatform.None,
+                ProductionUrl(link.Groups["id"].Value, sourceUrl), null, null, []))
+            .GroupBy(production => production.PouetId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
     public static DemosceneProduction? ParseProduction(byte[] bytes, string sourceUrl, string pouetId)
     {
         var html = WebUtility.HtmlDecode(Encoding.UTF8.GetString(bytes));
@@ -248,7 +332,7 @@ internal static class PouetHtmlParser
         var title = by.Success ? by.Groups["title"].Value.Trim() : pageTitle;
         var group = by.Success ? by.Groups["group"].Value.Trim() : null;
         var platform = DemoscenePlatforms.ParseLabels(visible);
-        var type = FirstKnownType(visible);
+        var type = TypeFromProductionField(html) ?? FirstKnownType(visible);
         var year = ReleaseDateRegex.Match(visible).Groups["year"].Value;
         if (year.Length == 0) year = YearRegex.Match(visible).Groups["year"].Value;
         var artwork = NormalizeUrl(Meta(html, "og:image"), sourceUrl) ??
@@ -343,6 +427,12 @@ internal static class PouetHtmlParser
         foreach (var type in new[] { "demopack", "diskmag", "musicdisk", "invitation", "slideshow", "intro", "demo", "4k", "64k", "256b", "wild", "game", "tool" })
             if (Regex.IsMatch(text, $"\\b{Regex.Escape(type)}\\b", RegexOptions.IgnoreCase)) return type;
         return null;
+    }
+
+    private static string? TypeFromProductionField(string html)
+    {
+        var type = ProductionTypeRegex.Match(html).Groups["type"].Value;
+        return type.Length == 0 ? null : type.Replace('_', ' ').Trim();
     }
 
     private static string ProductionUrl(string id, string sourceUrl)

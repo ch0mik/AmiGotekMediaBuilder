@@ -4,6 +4,7 @@ public static class DemosceneCatalogs
 {
     public const string Pouet = "pouet";
     public const string Demozoo = "demozoo";
+    public const string SceneOrg = "sceneorg";
 }
 
 [Flags]
@@ -123,6 +124,41 @@ public sealed record DemosceneQuery(
             Type = string.IsNullOrWhiteSpace(Type) ? null : Type.Trim()
         };
     }
+
+    /// <summary>
+    /// Applies the requested filters locally as a final guard.  Catalog search
+    /// endpoints do not all honour every query parameter (notably Demozoo's
+    /// browse endpoint), so callers must not rely on remote filtering alone.
+    /// </summary>
+    public bool Matches(DemosceneProduction production)
+    {
+        ArgumentNullException.ThrowIfNull(production);
+        var normalized = Normalize();
+        if (!production.Supports(normalized.Platform)) return false;
+        if (!string.IsNullOrWhiteSpace(normalized.Type) &&
+            !string.Equals(production.Type, normalized.Type, StringComparison.OrdinalIgnoreCase)) return false;
+        var searchableText = string.Join('\n',
+            new string?[] { production.Title, production.Group, production.Year, production.Type,
+             production.Description, production.SourceUrl }
+            .Concat(production.Downloads.Select(link => $"{link.FileName}\n{link.Url}")));
+        if (!string.IsNullOrWhiteSpace(normalized.Search) &&
+            !SearchTerms(normalized.Search).All(term =>
+                searchableText.Contains(term, StringComparison.OrdinalIgnoreCase))) return false;
+        if (!int.TryParse(production.Year, out var year))
+            return !normalized.YearFrom.HasValue && !normalized.YearTo.HasValue;
+        return (!normalized.YearFrom.HasValue || year >= normalized.YearFrom.Value) &&
+               (!normalized.YearTo.HasValue || year <= normalized.YearTo.Value);
+    }
+
+    /// <summary>Breaks a human query into searchable words, so that e.g.
+    /// "The Black Lotus - Eon" also matches a record titled "Eon" by
+    /// "The Black Lotus".</summary>
+    public static IReadOnlyList<string> SearchTerms(string? search) =>
+        System.Text.RegularExpressions.Regex.Matches(search ?? string.Empty, @"[\p{L}\p{N}]+").Cast<System.Text.RegularExpressions.Match>()
+            .Select(match => match.Value)
+            .Where(term => term.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 }
 
 public sealed record DemosceneDownloadOptions(
@@ -181,4 +217,5 @@ public sealed record DemosceneDownloadProgress(
     int Completed,
     int Total,
     DemosceneProduction Production,
-    DemosceneDownloadResult Result);
+    DemosceneDownloadResult Result,
+    bool IsStarting = false);

@@ -134,14 +134,47 @@ public sealed class DemozooCatalogProvider : IDisposable
             .Distinct(StringComparer.Ordinal)
             .Take(Math.Clamp(maxItems, 1, 50))
             .ToArray();
-        var results = new List<DemosceneProduction>();
+        var groupIds = Regex.Matches(text, @"(?:groups\\?/|groups/)(?<id>\d+)")
+            .Select(match => match.Groups["id"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .Take(8)
+            .ToArray();
+        var candidates = new List<DemosceneProduction>();
         foreach (var id in ids)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var production = await GetProductionAsync(id, cancellationToken);
-            if (production is not null) results.Add(production);
+            candidates.Add(new DemosceneProduction(id, $"Demozoo production {id}", null, null, "demo",
+                DemoscenePlatform.None, ProductionUrl(id), null, null, [])
+            {
+                Catalog = DemosceneCatalogs.Demozoo
+            });
         }
-        return results;
+        foreach (var groupId in groupIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var groupUrl = GroupUrl(groupId);
+            try
+            {
+                var groupPage = await _client.GetBytesAsync(groupUrl, _options.MaxResponseBytes, cancellationToken);
+                var groupName = DemozooHtmlParser.ParseGroupName(groupPage);
+                candidates.AddRange(DemozooHtmlParser.ParseListPage(groupPage, groupUrl)
+                    .Select(production => production with { Group = production.Group ?? groupName }));
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Keep direct production hits even if a group listing fails.
+            }
+        }
+        var uniqueCandidates = candidates
+            .GroupBy(production => production.PouetId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .Take(Math.Clamp(maxItems, 1, 50))
+            .ToArray();
+        var delay = _options.RequestDelay ?? TimeSpan.FromMilliseconds(350);
+        return (await LoadDetailsBatchAsync(uniqueCandidates, delay, cancellationToken))
+            .Where(production => production is not null)
+            .Select(production => production!)
+            .ToArray();
     }
 
     public static IReadOnlyList<DemosceneProduction> ParseListPage(byte[] bytes, string sourceUrl) =>
@@ -192,6 +225,9 @@ public sealed class DemozooCatalogProvider : IDisposable
     private string ProductionUrl(string id) =>
         new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"), $"productions/{id}/").ToString();
 
+    private string GroupUrl(string id) =>
+        new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"), $"groups/{id}/").ToString();
+
     private static int PlatformId(DemoscenePlatform platform) => platform switch
     {
         DemoscenePlatform.OcsEcs => OcsEcsPlatformId,
@@ -211,6 +247,8 @@ internal static class DemozooHtmlParser
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex HeadingRegex = new(
         "<h1\\b[^>]*>(?<value>.*?)</h1>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex GroupHeadingRegex = new(
+        "<h2\\b[^>]*>(?<value>.*?)</h2>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex TitleRegex = new(
         "<title\\b[^>]*>(?<value>.*?)</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex ImageRegex = new(
@@ -270,6 +308,13 @@ internal static class DemozooHtmlParser
             .GroupBy(production => production.PouetId, StringComparer.Ordinal)
             .Select(group => group.First())
             .ToArray();
+    }
+
+    public static string? ParseGroupName(byte[] bytes)
+    {
+        var html = WebUtility.HtmlDecode(Encoding.UTF8.GetString(bytes));
+        var value = Text(GroupHeadingRegex.Match(html).Groups["value"].Value);
+        return value.Length == 0 ? null : value;
     }
 
     public static DemosceneProduction? ParseProduction(byte[] bytes, string sourceUrl, string demozooId)

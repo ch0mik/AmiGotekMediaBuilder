@@ -9,6 +9,93 @@ namespace AmiGotekMediaBuilder.Core.Tests;
 public sealed class DemosceneTests
 {
     [Fact]
+    public void QueryMatchesOnlyTitleOrGroupForTextSearch()
+    {
+        var query = new DemosceneQuery(Search: "eon", Type: "demo");
+        var titleMatch = new DemosceneProduction("1", "Eon", "Group", "1998", "demo",
+            DemoscenePlatform.Aga, "https://example.test/1", null, null, []);
+        var groupMatch = titleMatch with { PouetId = "2", Title = "Another demo", Group = "Neon" };
+        var unrelated = titleMatch with { PouetId = "3", Title = "HiFatal", Group = "A9a" };
+        var partyMatch = titleMatch with
+        {
+            PouetId = "4", Title = "Another demo", Group = "Group",
+            SourceUrl = "https://files.scene.org/view/parties/revision-2026/demo.adf"
+        };
+
+        Assert.True(query.Matches(titleMatch));
+        Assert.True(query.Matches(groupMatch));
+        Assert.False(query.Matches(unrelated));
+        Assert.True(new DemosceneQuery(Search: "revision-2026").Matches(partyMatch));
+        Assert.True(new DemosceneQuery(Search: "The Black Lotus - Eon").Matches(
+            titleMatch with { Group = "The Black Lotus" }));
+    }
+
+    [Fact]
+    public void PouetSearchPageParsesProductionLinks()
+    {
+        var html = "<span class='prod'><a href='prod.php?which=81094'>Eon</a></span>";
+
+        var production = Assert.Single(PouetCatalogProvider.ParseSearchPage(
+            Encoding.UTF8.GetBytes(html), "https://www.pouet.net/search.php?what=eon&type=prod"));
+
+        Assert.Equal("81094", production.PouetId);
+        Assert.Equal("Eon", production.Title);
+        Assert.Equal("https://www.pouet.net/prod.php?which=81094", production.SourceUrl);
+    }
+
+    [Fact]
+    public void PouetProductionUsesDedicatedTypeFieldInsteadOfPageKeywords()
+    {
+        var html = """
+            <html><head><title>Eon by The Black Lotus :: pouët.net</title></head>
+            <body>Amiga OCS/ECS <td>type :</td>
+            <td><span class='type type_demo'>demo</span></td>
+            intro diskmag musicdisk</body></html>
+            """;
+
+        var production = PouetCatalogProvider.ParseProduction(
+            Encoding.UTF8.GetBytes(html), "https://www.pouet.net/prod.php?which=81094", "81094");
+
+        Assert.NotNull(production);
+        Assert.Equal("demo", production.Type);
+    }
+
+    [Fact]
+    public void SceneOrgSearchParsesDownloadableDemoFilesFromDemosAndParties()
+    {
+        var html = """
+            <a href="/view/demos/groups/example/amiga/example_demo.zip">Example</a>
+            <a href="/view/parties/2024/example/amiga_demo.adf">Party demo</a>
+            <a href="/view/graphics/example.png">Not a demo</a>
+            <a href="/view/demos/example/readme.txt">Not an image</a>
+            """;
+
+        var results = SceneOrgCatalogProvider.ParseSearchPage(Encoding.UTF8.GetBytes(html));
+
+        Assert.Equal(2, results.Count);
+        Assert.All(results, result => Assert.Equal(DemosceneCatalogs.SceneOrg, result.Catalog));
+        Assert.Contains(results, result => result.Downloads.Single().Url.EndsWith("/get/parties/2024/example/amiga_demo.adf"));
+        Assert.Contains(results, result => result.Year == "2024");
+    }
+
+    [Fact]
+    public void SceneOrgSearchExcludesNonAmigaArchiveEntries()
+    {
+        var html = """
+            <li class='file archive'><a href='/view/demos/pc/not_an_amiga_demo.zip'>PC demo</a></li>
+            <li class='file archive'><a href='/view/mirrors/amigascne/Gfx/D/Danny/danny_theblacklotus_brokensouls.zip'>Artwork</a></li>
+            <li class='file amiga'><a href='/view/demos/groups/example/amiga_demo.zip'>Amiga demo</a></li>
+            <li class='file archive'><a href='/view/parties/2024/revision/amiga-demo/party_demo.zip'>Party demo</a></li>
+            """;
+
+        var results = SceneOrgCatalogProvider.ParseSearchPage(Encoding.UTF8.GetBytes(html));
+
+        Assert.Equal(2, results.Count);
+        Assert.DoesNotContain(results, result => result.Title == "not an amiga demo");
+        Assert.DoesNotContain(results, result => result.Title == "danny theblacklotus brokensouls");
+    }
+
+    [Fact]
     public void RootSourceExcludesManagedDemosceneDirectoryFromIntake()
     {
         var root = Path.Combine(Path.GetTempPath(), "amiga-config-" + Guid.NewGuid().ToString("N"));
@@ -173,10 +260,40 @@ public sealed class DemosceneTests
 
             Assert.Equal(1, result.Downloaded);
             var output = Assert.Single(Directory.EnumerateFiles(root, "*.adf", SearchOption.AllDirectories));
-            Assert.EndsWith("Example Demo (Disk 1 of 2)(Data).adf", output, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith("Example Demo(1999)(Group) (Disk 1 of 2).adf", output, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(disk, await File.ReadAllBytesAsync(output));
-            Assert.True(File.Exists(output + ".source.json"));
+            Assert.True(File.Exists(Path.Combine(root, ".metadata", "" +
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(disk)).ToLowerInvariant() + ".source.json")));
+            Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(output)!, "*.json"));
             Assert.True(File.Exists(Path.Combine(root, "manifest.jsonl")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloaderUsesSceneOrgGetUrlAndPrefersKnownArchiveLinks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amiga-demoscene-sceneorg-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var handler = new DownloadHandler(CreateZip(new byte[1024]));
+            using var client = new SafeHttpClient(handler: handler);
+            using var service = new DemosceneDownloadService(client);
+            var production = new DemosceneProduction("45", "Eon", "The Black Lotus", "2019", "demo",
+                DemoscenePlatform.OcsEcs, "https://www.pouet.net/prod.php?which=81094", null, null,
+                [new DemosceneDownloadLink("https://files.scene.org/view/parties/2019/revision19/amiga-demo/tbl_eon_party_version.zip", "download", DemosceneAssetFormat.Zip),
+                 new DemosceneDownloadLink("https://www.pouet.net/mirrors.php?which=81094", "mirrors", DemosceneAssetFormat.Unknown)]);
+
+            var result = await service.DownloadAsync([production], new DemosceneDownloadOptions(root,
+                MaxConcurrency: 1, RequestDelayMilliseconds: 0));
+
+            Assert.Equal(1, result.Downloaded);
+            Assert.NotNull(handler.LastRequestUri);
+            Assert.Equal("/get/parties/2019/revision19/amiga-demo/tbl_eon_party_version.zip", handler.LastRequestUri!.AbsolutePath);
         }
         finally
         {
@@ -229,7 +346,7 @@ public sealed class DemosceneTests
 
             Assert.Equal(1, result.Downloaded);
             Assert.True(File.Exists(Path.Combine(root, "ADF", "Demoscene", "Example Demo",
-                "Example Demo (Disk 1 of 2)(Data).adf")));
+                "Example Demo(1999) (Disk 1 of 2).adf")));
         }
         finally
         {
@@ -289,8 +406,13 @@ public sealed class DemosceneTests
 
     private sealed class DownloadHandler(byte[] payload) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        public Uri? LastRequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        }
     }
 
     private sealed class DemozooHandler : HttpMessageHandler

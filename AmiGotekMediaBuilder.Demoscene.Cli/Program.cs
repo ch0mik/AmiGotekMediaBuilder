@@ -41,6 +41,8 @@ static Task<int> MainAsync(string[] args)
             Environment.GetEnvironmentVariable("POUET_BASE_URL") ?? "https://www.pouet.net"));
         using var demozoo = new DemozooCatalogProvider(new DemozooCatalogOptions(
             Environment.GetEnvironmentVariable("DEMOZOO_BASE_URL") ?? "https://demozoo.org"));
+        using var sceneOrg = new SceneOrgCatalogProvider(
+            Environment.GetEnvironmentVariable("SCENEORG_BASE_URL") ?? "https://files.scene.org");
 
         if (command == "show")
         {
@@ -61,8 +63,14 @@ static Task<int> MainAsync(string[] args)
         }
 
         var pouetProductions = pouet.BrowseAsync(query).GetAwaiter().GetResult();
-        var demozooProductions = demozoo.BrowseAsync(query).GetAwaiter().GetResult();
-        var productions = DemosceneCatalogMerger.Merge(pouetProductions, demozooProductions);
+        var sceneOrgProductions = sceneOrg.SearchAsync(query.Search, query.MaxItems).GetAwaiter().GetResult();
+        var demozooProductions = string.IsNullOrWhiteSpace(query.Search)
+            ? demozoo.BrowseAsync(query).GetAwaiter().GetResult()
+            : demozoo.SearchAsync(query.Search, query.MaxItems).GetAwaiter().GetResult();
+        var productions = DemosceneCatalogMerger.Merge(pouetProductions, demozooProductions, sceneOrgProductions)
+            .Where(query.Matches)
+            .Take(query.Normalize().MaxItems)
+            .ToArray();
         if (command == "list")
         {
             WriteProductions(productions, options.ContainsKey("json"));
@@ -73,7 +81,7 @@ static Task<int> MainAsync(string[] args)
             .WriteAsync(productions).GetAwaiter().GetResult();
         if (!options.ContainsKey("acknowledge-downloads") && !options.ContainsKey("yes"))
         {
-            Console.WriteLine($"discovered {productions.Count} production(s); no files downloaded");
+            Console.WriteLine($"discovered {productions.Length} production(s); no files downloaded");
             Console.WriteLine("repeat with --acknowledge-downloads to start the batch");
             return Task.FromResult(0);
         }
@@ -101,7 +109,7 @@ static Task<int> MainAsync(string[] args)
         if (options.ContainsKey("json"))
             Console.WriteLine(JsonSerializer.Serialize(new
             {
-                productions = productions.Count,
+                productions = productions.Length,
                 downloads = downloaded,
                 artwork_downloaded = artworkResults.Count(r => r.Status == DemosceneArtworkStatus.Downloaded),
                 artwork_already_present = artworkResults.Count(r => r.Status == DemosceneArtworkStatus.AlreadyPresent),
@@ -124,6 +132,14 @@ static Task<int> MainAsync(string[] args)
     {
         Console.Error.WriteLine($"error: {ex.Message}");
         return Task.FromResult(2);
+    }
+    catch (Exception ex)
+    {
+        // A console utility must never surface an unhandled .NET exception as
+        // a Windows crash dialog (for example after an HTTP failure). Keep the
+        // diagnostic in the invoking terminal instead.
+        Console.Error.WriteLine($"error: {ex.GetType().Name}: {ex.Message}");
+        return Task.FromResult(1);
     }
 }
 

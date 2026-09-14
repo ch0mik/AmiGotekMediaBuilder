@@ -201,9 +201,9 @@ public partial class DemosceneWindow : Window
             var screen = ScreenCombo.SelectedItem as GotekScreenProfile ?? GotekScreenProfile.Default;
             if (!int.TryParse(MaxItemsText.Text, out var maxItems) || maxItems < 1)
                 throw new ArgumentException("Max items must be a positive integer.");
-            AppendLog("Starting Pouët + Demozoo catalog search…");
+            AppendLog("Starting catalog search: Pouët, then scene.org, then Demozoo…");
             SetProgress(10, $"Searching for up to {maxItems} production(s)…");
-            StatusText.Text = "Loading Pouët and Demozoo production lists…";
+            StatusText.Text = "Searching Pouët, then scene.org, then Demozoo…";
             ProductionsList.ItemsSource = null;
             // This application is dedicated to demo productions.  Keep the
             // provider filter fixed instead of exposing a redundant type box.
@@ -212,6 +212,7 @@ public partial class DemosceneWindow : Window
             var cacheDirectory = GetDemosceneCacheDirectory();
             using var pouetClient = CreateDemosceneHttpClient();
             using var demozooClient = CreateDemosceneHttpClient();
+            using var sceneOrgClient = CreateDemosceneHttpClient();
             using var artworkClient = CreateDemosceneHttpClient();
             using var pouet = new PouetCatalogProvider(new PouetCatalogOptions(
                 Environment.GetEnvironmentVariable("POUET_BASE_URL") ?? "https://www.pouet.net",
@@ -219,14 +220,27 @@ public partial class DemosceneWindow : Window
             using var demozoo = new DemozooCatalogProvider(new DemozooCatalogOptions(
                 Environment.GetEnvironmentVariable("DEMOZOO_BASE_URL") ?? "https://demozoo.org",
                 MaxConcurrency: 2, RequestDelay: TimeSpan.Zero), demozooClient);
-            var pouetTask = pouet.BrowseAsync(query, cancellationToken);
-            var demozooTask = demozoo.BrowseAsync(query, cancellationToken);
-            SetProgress(-1, "Waiting for catalog responses…");
-            var productions = DemosceneCatalogMerger.Merge(await pouetTask, await demozooTask);
-            SetProgress(55, $"Merged {productions.Count} unique production(s).");
+            using var sceneOrg = new SceneOrgCatalogProvider(
+                Environment.GetEnvironmentVariable("SCENEORG_BASE_URL") ?? "https://files.scene.org", sceneOrgClient);
+            SetProgress(-1, "Searching the Pouët catalog…");
+            var pouetProductions = await pouet.BrowseAsync(query, cancellationToken);
+            AppendLog("Pouët completed; searching the scene.org archive…");
+            SetProgress(-1, "Searching the scene.org archive…", addToLog: false);
+            var sceneOrgProductions = await sceneOrg.SearchAsync(query.Search, maxItems, cancellationToken);
+            AppendLog("scene.org completed; searching Demozoo last…");
+            SetProgress(-1, "Searching the Demozoo catalog…", addToLog: false);
+            var demozooProductions = string.IsNullOrWhiteSpace(query.Search)
+                ? await demozoo.BrowseAsync(query, cancellationToken)
+                : await demozoo.SearchAsync(query.Search, maxItems, cancellationToken);
+            var productions = DemosceneCatalogMerger.Merge(
+                    pouetProductions, demozooProductions, sceneOrgProductions)
+                .Where(query.Matches)
+                .Take(query.Normalize().MaxItems)
+                .ToArray();
+            SetProgress(55, $"Merged {productions.Length} unique production(s).");
             await new DemosceneMetadataStore(Path.Combine(cacheDirectory, "metadata")).WriteAsync(productions, cancellationToken);
             SetProgress(-1, "Metadata saved; downloading thumbnails…");
-            StatusText.Text = $"Found {productions.Count} production(s); downloading thumbnails…";
+            StatusText.Text = $"Found {productions.Length} production(s); downloading thumbnails…";
             using var artwork = new DemosceneArtworkService(artworkClient);
             var artworkResults = await Task.Run(() => artwork.DownloadAsync(
                 productions, Path.Combine(cacheDirectory, "thumbnails-original"),
@@ -243,8 +257,8 @@ public partial class DemosceneWindow : Window
                 return new DemosceneItem(production, LoadImage(art?.ProcessedPath), screen);
             }).ToArray();
             ProductionsList.ItemsSource = items;
-            OnlineCountText.Text = $"{productions.Count} result(s)";
-            StatusText.Text = $"Found {productions.Count} production(s); " +
+            OnlineCountText.Text = $"{productions.Length} result(s)";
+            StatusText.Text = $"Found {productions.Length} production(s); " +
                               $"thumbnails: {artworkResults.Count(r => r.Status == DemosceneArtworkStatus.Downloaded)} downloaded, " +
                               $"{artworkResults.Count(r => r.Status == DemosceneArtworkStatus.Skipped)} missing; " +
                               $"preview: {screen.Width}×{screen.Height}.";
@@ -347,10 +361,24 @@ public partial class DemosceneWindow : Window
             if (operation is null) return;
             var progress = new UiProgress<DemosceneDownloadProgress>(p =>
             {
+                if (p.IsStarting)
+                {
+                    var fileName = Uri.TryCreate(p.Result.Url, UriKind.Absolute, out var uri)
+                        ? Path.GetFileName(uri.AbsolutePath) : p.Result.Url;
+                    var startActivity = $"Downloading [{p.Completed + 1}/{p.Total}] {p.Production.Title}: {fileName}…";
+                    SetProgress(-1, startActivity, addToLog: false);
+                    StatusText.Text = startActivity;
+                    return;
+                }
                 var percent = p.Total == 0 ? 100 : p.Completed * 100d / p.Total;
-                var activity = $"Downloading [{p.Completed}/{p.Total}] {p.Production.Title}: {p.Result.Status}";
+                var outcome = p.Result.Error is { Length: > 0 }
+                    ? $"{p.Result.Status} — {p.Result.Error}"
+                    : p.Result.Status.ToString();
+                var activity = $"Downloading [{p.Completed}/{p.Total}] {p.Production.Title}: {outcome}";
                 SetProgress(percent, activity, addToLog: false);
-                StatusText.Text = $"Downloading [{p.Completed}/{p.Total}] {p.Production.Title}: {p.Result.Status}";
+                StatusText.Text = activity;
+                if (p.Result.Status is DemosceneDownloadStatus.Skipped or DemosceneDownloadStatus.Failed)
+                    AppendLog(activity);
             });
             using var downloader = new DemosceneDownloadService();
             var result = await downloader.DownloadAsync(productions,
@@ -584,7 +612,9 @@ public partial class DemosceneWindow : Window
             Description = production.Description ?? string.Empty;
             PlatformText = string.Join(", ", DemoscenePlatforms.Enumerate(production.Platforms));
             var catalog = production.Catalog.Equals(DemosceneCatalogs.Demozoo, StringComparison.OrdinalIgnoreCase)
-                ? "Demozoo" : "Pouët";
+                ? "Demozoo"
+                : production.Catalog.Equals(DemosceneCatalogs.SceneOrg, StringComparison.OrdinalIgnoreCase)
+                    ? "scene.org" : "Pouët";
             Summary = $"{catalog} #{production.PouetId}  {production.Year}  {production.Type}";
             DownloadText = production.Downloads.Count == 0
                 ? "No candidate ADF/DSK link"
