@@ -7,14 +7,6 @@ obejmuje skanowanie plików ADF/DSK/ZIP, parsowanie nazw, grupowanie wydań,
 katalog JSONL, wielosystemowy cache SQLite metadanych i artworku, pobieranie
 online, NFO oraz bezpieczny eksport do stagingu Gotek.
 
-## Ostatnie zmiany
-
-W ostatnim tygodniu przebudowano grupowanie gier, cały pipeline pobierania
-metadanych i artworku oraz obsługę lokalnego cache. GUI otrzymało również
-anulowanie długich operacji przyciskiem **Cancel**. Pełny opis znajduje się w
-[podsumowaniu zmian z 29.09–05.10.2026](CHANGES-2026-09-29--2026-10-05.md).
-Dostępne jest również angielskie [podsumowanie zmian od 14.09.2026](CHANGES-SINCE-2026-09-14.md).
-
 ## Wymagania
 
 - Windows 10/11, Linux (desktop) lub macOS dla GUI (Avalonia);
@@ -141,6 +133,19 @@ specjalnych.
 Archiwa ZIP są odczytywane bez rozpakowywania i bez modyfikacji. W katalogu
 wirtualna ścieżka wpisu ma postać collection.zip::Game.adf.
 
+### Zasady grupowania wydań
+
+Program odróżnia katalog pojedynczej gry od katalogu kolekcji. Jeśli katalog
+zawiera różne tytuły, każda gra jest grupowana osobno według znormalizowanego
+tytułu, edycji, wersji i formatu obrazu. Katalogi indeksowe `A`–`Z` również nie
+są traktowane jako nazwy gier.
+
+Katalog zawierający jedno wydanie pozostaje jego granicą. Dzięki temu obrazy o
+ogólnych nazwach, takich jak `Disk 1`, `Boot` i `Data`, mogą zostać połączone z
+właściwą grą na podstawie nazwy katalogu. Alternatywne obrazy tego samego
+numeru dysku są rozdzielane na osobne warianty; niejednoznaczne lub niepełne
+zestawy trafiają do ręcznej weryfikacji zamiast być łączone losowo.
+
 ## Build offline
 
 build wykonuje scan → parse → group, zapisuje katalog JSONL oraz generuje
@@ -201,12 +206,12 @@ sprawdzane, a brakujące pola są scalane. Sam URL obrazka nie kończy
 wyszukiwania: błąd HTTP, HTML zamiast obrazu albo uszkodzony plik powoduje
 przejście do następnego providera.
 
-Brak dopasowania albo brak obrazka u providera nie kończy się pustą grafiką:
-dla każdej zwykłej gry używany jest lokalny fallback `default-artwork` (w GUI
-wyświetlany jako `Default artwork`)
-(`assets\artwork-original` i `assets\artwork-processed`). Ten sam plik jest
-kopiowany obok NFO podczas eksportu. Demoscene ma osobny katalog miniaturek i
-zawsze pozostaje wyłączona z tego fallbacku.
+Brak dopasowania albo brak obrazka u providera nie blokuje eksportu. Build
+online nie zapisuje placeholdera w cache artworku, dzięki czemu nie udaje on
+udanego pobrania i nie zasłania późniejszych wyników. Podczas eksportu
+wbudowany `default-artwork` jest zapisywany bezpośrednio obok NFO, jeśli nie ma
+zweryfikowanej grafiki gry. Demoscene ma osobny katalog miniaturek i pozostaje
+wyłączona z tego fallbacku.
 
 Jeżeli rekord cache zawiera wynik providera z metadata, ale bez artworku,
 kolejny build nie odpytuje ponownie providerów. Gry, dla których żaden provider
@@ -401,14 +406,14 @@ kwarantannowana: log podaje oczekiwany zakres oraz brakujące dyski, a eksport
 nie tworzy ani częściowych obrazów, ani artworku. Zasada działa jednakowo dla
 `Games` i `Demoscene`.
 
-Jeżeli obrazy znajdują się we wspólnym podkatalogu, podkatalog jest granicą
-jednej gry — jego zawartość nie jest dzielona według wariantów nazw. Dotyczy to
-również nazw `Atlantis - 01.adf` ... `Atlantis - 11.adf`: eksport trafia do
-jednego katalogu `Atlantis` i używa nazw `Atlantis (Disk 1 of 11).adf` ...
-`Atlantis (Disk 11 of 11).adf`. `Atlantis - Save.adf` pozostaje osobnym obrazem
-`Atlantis (Save Disk).adf` w tym samym katalogu, po obrazach dysków. Numery dysków są
-odczytywane z nazwy (w tym z markerów TOSEC `(Disk n of m)`) i nie są zgadywane
-na podstawie kolejności plików.
+Jeśli podkatalog zawiera jedno wydanie, obrazy takie jak
+`Atlantis - 01.adf` ... `Atlantis - 11.adf` trafiają do jednego katalogu
+`Atlantis` i otrzymują nazwy `Atlantis (Disk 1 of 11).adf` ...
+`Atlantis (Disk 11 of 11).adf`. `Atlantis - Save.adf` pozostaje obrazem
+`Atlantis (Save Disk).adf` w tym samym katalogu. Jeśli jednak podkatalog zawiera
+kilka różnych tytułów, jest rozpoznawany jako kolekcja i gry są eksportowane
+oddzielnie. Numery dysków są odczytywane z nazwy, w tym z markerów TOSEC
+`(Disk n of m)`, a nie zgadywane na podstawie kolejności plików.
 
 Nazwa podkatalogu jest też używana jako tytuł, gdy nazwy plików są skrócone:
 `FateOfAtlantis-FFAS\Atlantis - 01.adf` daje tytuł `Fate Of Atlantis`.
@@ -455,6 +460,9 @@ Plik zawiera wyłącznie ścieżki, nie zawiera credentiali.
 Podczas każdej operacji pasek postępu pokazuje stan pracy. Pole `Current activity`
 pokazuje aktualny plik/element ZIP podczas skanowania oraz etap, tytuł i provider
 przy budowaniu online. `Operation log` zawiera pełną historię kroków i błędów.
+Przycisk **Cancel** obok paska postępu anuluje aktywne `Scan`, `Build` albo
+`Export` w najbliższym bezpiecznym punkcie. Ukończone wcześniej pliki pozostają
+zachowane, a podczas trwającej operacji nie można uruchomić drugiej.
 Przed eksportem zaznacz Export gate acknowledged, wybierz ekran z listy
 (profil domyślny 480×320), podaj Run ID i kliknij Export. Dostępne są profile
 480×320 — Guition JC3248W535C 3.5", 800×480 — Waveshare ESP32-S3-
@@ -468,9 +476,11 @@ ustawieniu opisanych wyżej credentiali. Lokalny
 GameBase jest automatycznie używany, jeśli ustawiono `AMIGA_ADF_GAMEBASE_DB`;
 ścieżka nie jest już wybierana w GUI.
 Przy wyłączonym online UI używa cache/fallbacku offline i nie wykonuje żądań sieciowych.
-Po buildzie lista wyników GUI pokazuje miniaturkę pobraną od providera albo
-lokalny fallback w `assets\artwork-processed`; miniaturki demosceny są pomijane. Motyw głównego
-GUI korzysta z granatowo-niebieskich ról kolorów inspirowanych Hall of Light;
+Po buildzie lista wyników GUI pokazuje zweryfikowaną miniaturkę providera, jeśli
+jest dostępna. Build offline może użyć lokalnego fallbacku; w buildzie online
+brak grafiki pozostaje widoczny do czasu eksportu, który dopiero wtedy zapisuje
+wbudowany placeholder. Miniaturki demosceny są pomijane. Motyw głównego GUI
+korzysta z granatowo-niebieskich ról kolorów inspirowanych Hall of Light;
 `AmiGotekMediaBuilder.Demoscene.Gui` zachowuje własny, niezależny motyw.
 GUI demosceny używa osobnego fontu MatrixType Display i zielonego motywu
 matrix; jego licencja CC0 jest opisana w `THIRD_PARTY.md`.

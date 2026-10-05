@@ -7,12 +7,6 @@ ZIP files, parses TOSEC-style names, groups multi-disk releases, maintains
 JSONL/SQLite catalogs, downloads public metadata and artwork, writes NFO files,
 and exports a safe Gotek staging tree.
 
-## Recent changes
-
-Recent work brought resumable demoscene downloads, redesigned game grouping and
-scraping, validated artwork fallback, persistent SQLite lookup reuse, and
-cancellable GUI operations. See [Changes since September 14, 2026](CHANGES-SINCE-2026-09-14.md).
-
 The demoscene pipeline is a separate product: `AmiGotekMediaBuilder.Demoscene`
 with its own CLI and Avalonia GUI.
 
@@ -124,6 +118,19 @@ inside ZIP archives. ZIP files are read without extraction or modification;
 entries use the virtual path `collection.zip::Game.adf`. The parser extracts
 title, year, language, chipset, version, crack group, disk number, edition,
 and special-disk roles.
+
+### Release grouping rules
+
+The grouper distinguishes a single-game directory from a collection directory.
+When one directory contains distinct titles, each game is grouped separately
+by normalized title, edition, version, and image format. Alphabetical `A`–`Z`
+index directories are not treated as game names.
+
+A directory containing one release remains an explicit release boundary. This
+allows generic filenames such as `Disk 1`, `Boot`, and `Data` to be associated
+with the game named by their directory. Alternative images for the same disk
+number are split into separate variants; ambiguous and incomplete sets are sent
+for manual review instead of being merged arbitrarily.
 
 ## Build and cache
 
@@ -311,9 +318,11 @@ the whole release is quarantined. The log identifies the expected range and
 missing disks; no partial disk set or artwork is exported. This applies to both
 `Games` and `Demoscene`.
 
-Files in one shared input subdirectory are one game. Thus
-`Atlantis - 01.adf` through `Atlantis - 11.adf` become TOSEC-named images in
-the same `Atlantis` directory. See the
+When a subdirectory contains one release, `Atlantis - 01.adf` through
+`Atlantis - 11.adf` become TOSEC-named images in the same `Atlantis` output
+directory. When a subdirectory contains several distinct titles, it is treated
+as a collection and each game is exported separately. Disk numbers come from
+the parsed filename and TOSEC markers, not from filesystem order. See the
 [TOSEC Naming Convention](https://www.tosecdev.org/tosec-naming-convention).
 
 Use `--verify-only` to validate without writing new files.
@@ -333,7 +342,10 @@ stored.
 
 The upper activity box shows the current file, ZIP entry, provider, artwork
 download, or export item. The lower operation log retains the full history and
-errors. Supported screen profiles are 480×320 Guition JC3248W535C 3.5",
+errors. The **Cancel** button beside the progress bar requests cancellation of
+the active Scan, Build, or Export at the next safe checkpoint. Files completed
+before cancellation are preserved, and another operation cannot start while
+one is active. Supported screen profiles are 480×320 Guition JC3248W535C 3.5",
 800×480 Waveshare ESP32-S3-Touch-LCD-7, and 320×240 Waveshare
 ESP32-S3-Touch-LCD-2.8, matching the
 [Gotek Touchscreen interface](https://mesarim.github.io/Gotek-Touchscreen-interface/).
