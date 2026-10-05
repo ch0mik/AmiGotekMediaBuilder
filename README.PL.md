@@ -2,10 +2,11 @@
 
 **Język:** polski | [English](README.md)
 
-Migracja narzędzia ami-gotek-media-builder do C# i .NET 10. Obecna wersja
-obejmuje skanowanie plików ADF/DSK/ZIP, parsowanie nazw, grupowanie wydań,
-katalog JSONL, wielosystemowy cache SQLite metadanych i artworku, pobieranie
-online, NFO oraz bezpieczny eksport do stagingu Gotek.
+AmiGotekMediaBuilder to aplikacja C#/.NET 10 do przygotowywania bibliotek gier
+i demosceny Amiga dla urządzeń Gotek. Skanuje pliki ADF, DSK i ZIP, rozpoznaje
+i grupuje wydania, prowadzi katalog JSONL oraz wielosystemową bazę SQLite,
+pobiera metadane i artwork, generuje NFO i tworzy bezpieczne drzewo stagingowe
+gotowe do eksportu.
 
 ## Wymagania
 
@@ -535,13 +536,10 @@ Po opublikowaniu Release workflow uruchomi się raz i dołączy do niego assety.
 - NFO jest ograniczone do 512 bajtów UTF-8;
 - źródła nie są usuwane ani przenoszone przez aplikację.
 
-## Aktualny zakres
+## Komponenty projektu
 
-Gotowe są: offline/online Core, CLI, katalog, eksport z artworkiem, NFO, cache
-metadanych, pipeline GameBase/ScreenScraper/OpenRetro/TheGamesDB/Libretro oraz providerzy
-Pouët/Demozoo dla demosceny,
-masowy downloader demosceny z deduplikacją, walidacja ścieżek, bezpieczny
-transport HTTP i wieloplatformowe GUI Avalonia.
-
-Poza zakresem pozostają konwersja DMS/LHA do ADF, artwork/PDF OCR, ręczne
-approvals oraz pełna zgodność z każdą funkcją aplikacji Python.
+Projekt obejmuje bibliotekę Core z trybem offline i online, aplikacje CLI i
+Avalonia GUI, katalog oraz cache SQLite, eksport Gotek z artworkiem i NFO,
+pipeline GameBase/ScreenScraper/OpenRetro/TheGamesDB/Libretro, osobne providery
+Pouët/Demozoo i masowy downloader demosceny z deduplikacją, walidację ścieżek
+oraz bezpieczny transport HTTP.

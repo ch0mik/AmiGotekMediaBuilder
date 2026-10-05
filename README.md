@@ -2,10 +2,11 @@
 
 **Language:** [polski / Polish](README.PL.md) | English
 
-A C#/.NET 10 migration of `ami-gotek-media-builder`. It scans ADF, DSK, and
-ZIP files, parses TOSEC-style names, groups multi-disk releases, maintains
-JSONL/SQLite catalogs, downloads public metadata and artwork, writes NFO files,
-and exports a safe Gotek staging tree.
+AmiGotekMediaBuilder is a C#/.NET 10 application for preparing Amiga game and
+demoscene libraries for Gotek devices. It scans ADF, DSK, and ZIP files,
+identifies and groups releases, maintains JSONL and multisystem SQLite catalogs,
+downloads metadata and artwork, writes NFO files, and creates a safe staging
+tree ready for export.
 
 The demoscene pipeline is a separate product: `AmiGotekMediaBuilder.Demoscene`
 with its own CLI and Avalonia GUI.
@@ -380,7 +381,7 @@ git push origin v1.1.1
 gh release create v1.1.1 --generate-notes --title v1.1.1
 ```
 
-## Security and scope
+## Security
 
 Input images are never modified, moved, or deleted. Paths are normalized and
 checked for containment/symlinks; staging is isolated by a validated run ID;
@@ -388,11 +389,10 @@ export never writes directly to an SD card; public HTTP blocks private hosts,
 unsafe redirects, oversized responses, and invalid image bytes; NFO output is
 limited to 512 UTF-8 bytes; and the application ships no credentials.
 
-Implemented: offline/online Core, CLI, catalog, ZIP scanning, TOSEC grouping,
-Gotek export, NFO, SQLite metadata/artwork cache, public game providers, local
-GameBase support, separate Pouët/Demozoo demoscene cataloging and downloads,
-safe HTTP transport, and cross-platform Avalonia GUIs.
+## Project components
 
-Out of scope: DMS/LHA conversion to ADF, OCR/PDF artwork extraction, manual
-approval workflows, and complete compatibility with every feature of the
-original Python application.
+The project includes an offline/online Core library, CLI and cross-platform
+Avalonia GUI applications, ZIP scanning, TOSEC grouping, SQLite metadata and
+artwork catalogs, Gotek export with NFO files, public game providers, local
+GameBase support, separate Pouët/Demozoo demoscene cataloging and downloads,
+path validation, and safe HTTP transport.
