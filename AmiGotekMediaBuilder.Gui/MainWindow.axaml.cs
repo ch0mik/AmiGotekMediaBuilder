@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private bool _scanCompleted;
     private bool _buildCompleted;
     private bool _loadingSettings;
+    private CancellationTokenSource? _operationCts;
 
     public MainWindow()
     {
@@ -104,12 +105,11 @@ public partial class MainWindow : Window
 
     private static string DisplayProviderName(string id) => id switch
     {
-        "hasheous" => "Hasheous",
-        "playmatch" => "Playmatch",
+        "screenscraper" => "ScreenScraper",
+        "thegamesdb" => "TheGamesDB",
+        "libretro" => "Libretro thumbnails",
         "openretro" => "OpenRetro",
         "gamebase" => "GameBase",
-        "hall-of-light" => "Hall of Light",
-        "wikipedia" => "Wikipedia",
         "default-artwork" => "Default artwork",
         _ => id
     };
@@ -144,18 +144,19 @@ public partial class MainWindow : Window
     private async void ScanClick(object? sender, RoutedEventArgs e)
     {
         SetWorkflowState(scanCompleted: false, buildCompleted: false);
-        var completed = await RunOperation(async (config, progress, currentActivity) =>
+        var completed = await RunOperation(async (config, progress, currentActivity, cancellationToken) =>
         {
             progress.Report((-1, "Scanning source directory…"));
             var scanProgress = new Progress<IntakeScanner.ScanProgress>(update =>
                 currentActivity.Report($"Scanning ({update.Phase}): {update.Path}"));
             var scans = await Task.Run(() => IntakeScanner.ScanDirectories(
-                [config.OriginalDirectory], config.IntakeExcludedDirectories, scanProgress));
+                [config.OriginalDirectory], config.IntakeExcludedDirectories, scanProgress, cancellationToken), cancellationToken);
             progress.Report((45, $"Found {scans.Count} supported file(s)."));
             var parsed = scans.Select(s =>
             {
                 var result = FilenameParser.Parse(s.Filename);
                 result.SourcePath = s.Path;
+                result.SourceSize = s.Size;
                 result.SourceSha256 = s.Sha256;
                 return result;
             }).ToArray();
@@ -166,7 +167,7 @@ public partial class MainWindow : Window
                     $"{groups.Count(g => g.QuarantineReason is not null)} quarantined",
                 groups.Select(g => $"{g.Title ?? "Unknown"} [{g.Extension}] " +
                                    (g.QuarantineReason ?? "ready"))
-                    .Select(text => new ResultItem(text)).ToArray());
+                    .Select(text => new ResultItem(text)).ToArray(), true);
         });
         if (completed)
         {
@@ -194,18 +195,19 @@ public partial class MainWindow : Window
     }
 
     private async Task<bool> BuildOperation(bool online) =>
-        await RunOperation(async (config, progress, currentActivity) =>
+        await RunOperation(async (config, progress, currentActivity, cancellationToken) =>
         {
             progress.Report((-1, "Scanning source directory for build…"));
             var scanProgress = new Progress<IntakeScanner.ScanProgress>(update =>
                 currentActivity.Report($"Build scan ({update.Phase}): {update.Path}"));
             var scans = await Task.Run(() => IntakeScanner.ScanDirectories(
-                [config.OriginalDirectory], config.IntakeExcludedDirectories, scanProgress));
+                [config.OriginalDirectory], config.IntakeExcludedDirectories, scanProgress, cancellationToken), cancellationToken);
             progress.Report((25, $"Found {scans.Count} supported file(s)."));
             var parsed = scans.Select(s =>
             {
                 var result = FilenameParser.Parse(s.Filename);
                 result.SourcePath = s.Path;
+                result.SourceSize = s.Size;
                 result.SourceSha256 = s.Sha256;
                 return result;
             }).ToArray();
@@ -225,7 +227,7 @@ public partial class MainWindow : Window
                     "artwork" when string.Equals(update.Provider, DefaultArtworkService.ProviderId,
                         StringComparison.OrdinalIgnoreCase) => "Using default artwork",
                     "artwork" => "Downloading artwork",
-                    "provider-error" => "Provider error",
+                    "provider-summary" => "Provider results",
                     "artwork-error" => "Artwork download error",
                     "fallback-error" => "Fallback artwork error",
                     "completed" => "Completed metadata",
@@ -244,11 +246,12 @@ public partial class MainWindow : Window
             var metadata = online
                 ? await (enricher = new HybridMetadataEnricher(providers))
                     .EnrichAsync(groups, config.MetadataCacheDirectory, config.NfoDirectory,
+                        cancellationToken: cancellationToken,
                         progress: enrichmentProgress,
                         catalogDatabasePath: config.CatalogDatabasePath)
                 : await Task.Run(() => (offlineEnricher = new OfflineEnricher()).Enrich(
                     groups, config.MetadataCacheDirectory, config.NfoDirectory,
-                    config.CatalogDatabasePath));
+                    config.CatalogDatabasePath, cancellationToken), cancellationToken);
             progress.Report((90, $"Build wrote {metadata.Count} metadata record(s)."));
             var metadataByKey = metadata
                 .GroupBy(record => record.ReleaseKey, StringComparer.Ordinal)
@@ -260,7 +263,7 @@ public partial class MainWindow : Window
                     (online ? $", catalog cache: {enricher?.CatalogCacheHits ?? 0} hit(s), " +
                               $"{enricher?.CatalogCacheMisses ?? 0} queried" : "") +
                     (online ? $" ({config.ArtworkOriginalDirectory})" : "") +
-                    (online ? ", public artwork providers enabled" : ""),
+                    (online ? ", game scraper pipeline enabled" : ""),
                 groups.Select(g =>
                 {
                     metadataByKey.TryGetValue(g.ReleaseKey, out var record);
@@ -272,7 +275,7 @@ public partial class MainWindow : Window
                         ? $" [{artworkProvider} artwork]"
                         : string.Empty;
                     return new ResultItem(title + provider, LoadImage(artworkPath));
-                }).ToArray());
+                }).ToArray(), true);
         });
 
     private async void ExportClick(object? sender, RoutedEventArgs e)
@@ -297,18 +300,19 @@ public partial class MainWindow : Window
 
     private async Task<bool> ExportOperation(bool gateAcknowledged,
         string runIdText, GotekScreenProfile screen) =>
-        await RunOperation(async (config, progress, currentActivity) =>
+        await RunOperation(async (config, progress, currentActivity, cancellationToken) =>
         {
             progress.Report((-1, "Scanning source directory for export…"));
             var scanProgress = new Progress<IntakeScanner.ScanProgress>(update =>
                 currentActivity.Report($"Export scan ({update.Phase}): {update.Path}"));
             var scans = await Task.Run(() => IntakeScanner.ScanDirectories(
-                [config.OriginalDirectory], config.IntakeExcludedDirectories, scanProgress));
+                [config.OriginalDirectory], config.IntakeExcludedDirectories, scanProgress, cancellationToken), cancellationToken);
             progress.Report((30, $"Found {scans.Count} supported file(s)."));
             var parsed = scans.Select(s =>
             {
                 var result = FilenameParser.Parse(s.Filename);
                 result.SourcePath = s.Path;
+                result.SourceSize = s.Size;
                 result.SourceSha256 = s.Sha256;
                 return result;
             }).ToArray();
@@ -331,21 +335,24 @@ public partial class MainWindow : Window
                 artworkProcessedDirectory: config.ArtworkProcessedDirectory,
                 artworkOriginalDirectory: config.ArtworkOriginalDirectory,
                 progress: exportProgress,
-                rtfmDirectory: config.RtfmDirectory));
+                rtfmDirectory: config.RtfmDirectory,
+                cancellationToken: cancellationToken), cancellationToken);
             progress.Report((95, $"Wrote {result.FilesWritten.Count} file(s)."));
-            return ($"Exported {result.ReleasesExported} release(s); " +
+            var succeeded = result.Conflicts.Count == 0 && result.Errors.Count == 0;
+            return ($"{(succeeded ? "Exported" : "Export incomplete:")} {result.ReleasesExported} release(s); " +
                     $"{result.FilesWritten.Count} file(s), {result.Conflicts.Count} conflict(s), " +
                     $"{result.SkippedQuarantined.Count} skipped, {result.Errors.Count} error(s); " +
                     $"screen: {screen.DisplayName}; staging: {result.StagingRoot}",
                 result.FilesWritten.Concat(result.Conflicts)
                     .Concat(result.SkippedQuarantined.Select(s => $"SKIPPED: {s}"))
                     .Concat(result.Errors.Select(s => $"ERROR: {s}"))
-                    .Select(text => new ResultItem(text)).ToArray());
+                    .Select(text => new ResultItem(text)).ToArray(), succeeded);
         });
 
     private async Task<bool> RunOperation(
         Func<PathConfig, IProgress<(double Percent, string Message)>,
-            IProgress<string>, Task<(string Summary, IReadOnlyList<ResultItem> Items)>> operation)
+            IProgress<string>, CancellationToken,
+            Task<(string Summary, IReadOnlyList<ResultItem> Items, bool Succeeded)>> operation)
     {
         var progress = new Progress<(double Percent, string Message)>(update =>
         {
@@ -362,6 +369,8 @@ public partial class MainWindow : Window
         OperationProgress.IsIndeterminate = false;
         OperationProgress.Value = 0;
         SetCurrentActivity("Preparing operation…");
+        var operationCts = BeginCancellableOperation();
+        if (operationCts is null) return false;
         try
         {
             var config = CreateGuiPathConfig(
@@ -377,12 +386,20 @@ public partial class MainWindow : Window
             AppendLog($"Destination: {config.StagingDirectory}");
             StatusText.Text = "Working…";
             ResultsList.ItemsSource = null;
-            var result = await Task.Run(() => operation(config, progress, currentActivity));
+            var result = await Task.Run(() => operation(config, progress, currentActivity, operationCts.Token), operationCts.Token);
             ResultsList.ItemsSource = result.Items;
             StatusText.Text = result.Summary;
             OperationProgress.Value = 100;
             AppendLog(result.Summary);
-            return true;
+            return result.Succeeded;
+        }
+        catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
+        {
+            const string message = "Operation cancelled. Existing completed files were kept.";
+            StatusText.Text = message;
+            SetCurrentActivity(message);
+            AppendLog(message);
+            return false;
         }
         catch (Exception ex) when (ex is PathConfigException or IOException or ArgumentException or InvalidOperationException)
         {
@@ -390,6 +407,40 @@ public partial class MainWindow : Window
             AppendLog($"ERROR: {ex.Message}");
             return false;
         }
+        finally
+        {
+            EndCancellableOperation(operationCts);
+        }
+    }
+
+    private CancellationTokenSource? BeginCancellableOperation()
+    {
+        if (_operationCts is not null)
+        {
+            StatusText.Text = "Another operation is already running. Select Cancel first.";
+            return null;
+        }
+        _operationCts = new CancellationTokenSource();
+        CancelButton.IsEnabled = true;
+        return _operationCts;
+    }
+
+    private void EndCancellableOperation(CancellationTokenSource operation)
+    {
+        if (!ReferenceEquals(_operationCts, operation)) return;
+        _operationCts.Dispose();
+        _operationCts = null;
+        CancelButton.IsEnabled = false;
+    }
+
+    private void CancelClick(object? sender, RoutedEventArgs e)
+    {
+        if (_operationCts is not { IsCancellationRequested: false }) return;
+        _operationCts.Cancel();
+        CancelButton.IsEnabled = false;
+        StatusText.Text = "Cancellation requested…";
+        SetCurrentActivity("Cancellation requested; stopping at the next safe point…");
+        AppendLog("Cancellation requested.");
     }
 
     /// <summary>

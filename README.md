@@ -7,6 +7,12 @@ ZIP files, parses TOSEC-style names, groups multi-disk releases, maintains
 JSONL/SQLite catalogs, downloads public metadata and artwork, writes NFO files,
 and exports a safe Gotek staging tree.
 
+## Recent changes
+
+Recent work brought resumable demoscene downloads, redesigned game grouping and
+scraping, validated artwork fallback, persistent SQLite lookup reuse, and
+cancellable GUI operations. See [Changes since September 14, 2026](CHANGES-SINCE-2026-09-14.md).
+
 The demoscene pipeline is a separate product: `AmiGotekMediaBuilder.Demoscene`
 with its own CLI and Avalonia GUI.
 
@@ -139,17 +145,20 @@ key is the SHA-256 of each disk (or all disk hashes for a set), with
 `release_key` as a compatibility fallback.
 
 The first online build stores provider results and artwork indexes in SQLite.
-Later builds reuse valid metadata and existing artwork without repeating the
-same HTTP lookup or image download. Legacy
+Later builds reuse every valid provider result, including metadata-only
+matches, without repeating the scrape. A saved artwork URL can restore a
+missing local image without searching for the game again. Legacy
 `catalog/metadata-cache/metadata-*.json` files remain readable and are imported
 into SQLite; they are not deleted.
 
 ## Online metadata and artwork
 
-`--online` enables credential-free public providers: Hasheous, Playmatch,
-OpenRetro, Hall of Light, Wikipedia, and optional local GameBase. No API keys,
-passwords, or credentials are stored in this repository. If no provider finds
-an image, metadata falls back to filename data and artwork falls back to
+`--online` enables the game-specific scraper pipeline: local GameBase,
+ScreenScraper, OpenRetro, TheGamesDB, and Libretro artwork. ScreenScraper is
+enabled by `SCREENSCRAPER_DEV_ID` and `SCREENSCRAPER_DEV_PASSWORD`; optional
+user credentials use `SCREENSCRAPER_USER` and `SCREENSCRAPER_PASSWORD`.
+TheGamesDB is enabled by `THEGAMESDB_API_KEY`. OpenRetro and Libretro require
+no credentials. If no source supplies a valid image, export uses
 `default-artwork`.
 
 ```powershell
@@ -157,13 +166,12 @@ dotnet run --project AmiGotekMediaBuilder.Cli -- build `
   --library-root C:\AmigaLibrary --online
 ```
 
-The JSON adapter accepts `results`, `games`, `data`, and `items`, plus common
-image fields such as `artwork_url`, `image_url`, `cover.url`, `images[]`, and
-`screenshots[]`. OpenRetro supplies Amiga title data and front/first-screen
-artwork. Hasheous and Playmatch use public hash-identification endpoints,
-Wikipedia is a title-based fallback, and Hall of Light reads the public Amiga
-game catalogue. Hall of Light anti-bot pages are treated as a safe miss; CAPTCHA
-is not bypassed.
+ScreenScraper identifies the first disk by SHA-1 and MD5. OpenRetro supplies
+Amiga title data and front/first-screen artwork, TheGamesDB fills remaining
+metadata and box art, and Libretro is the final keyless artwork candidate.
+Every source is queried and missing fields are merged. An artwork URL is not a
+success until its response is downloaded and its image signature is validated;
+HTTP errors, HTML, and damaged images automatically continue to the next source.
 
 Artwork is stored as:
 
@@ -176,10 +184,11 @@ assets\artwork-original\<Release>.<ext>.source.json
 The original bytes and provenance are preserved. Artwork downloads follow up to
 three validated redirects, honor the system proxy, block private hosts, limit
 response size, and verify JPG/PNG/WEBP/GIF signatures. An HTML challenge saved
-as `.jpg` is rejected. Missing-artwork cache records and the embedded placeholder
-are retried on a later online build. Legacy game records tagged `pouet` or
-`demozoo` are considered stale and cannot leak demoscene titles, descriptions,
-or thumbnails into the game pipeline.
+as `.jpg` is rejected. A valid provider result without artwork remains cached
+and is not scraped again; only a pure `offline-filename` fallback can be retried
+on a later online build. Legacy game records tagged `pouet` or `demozoo` are
+considered stale and cannot leak demoscene titles, descriptions, or thumbnails
+into the game pipeline.
 
 ### GameBase
 
@@ -249,6 +258,11 @@ before copying it. Pouët/Demozoo search works
 without a library source; metadata and thumbnails use the application's local
 cache. Select an `Export directory` before downloading or exporting. Both paths
 write a GTi-ready layout with canonical TOSEC filenames:
+
+When a title is entered in **Search**, the application also queries the public
+[scene.org archive](https://files.scene.org/browse/) (including its party archive)
+for downloadable ADF/DSK, ZIP, and GZip candidates. scene.org supplies file
+links, not artwork metadata.
 
 ```text
 <export-directory>\ADF\Demoscene\<Release>\<TOSEC disk name>.adf

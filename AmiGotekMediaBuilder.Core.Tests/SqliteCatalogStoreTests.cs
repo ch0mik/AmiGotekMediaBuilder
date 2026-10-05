@@ -62,15 +62,17 @@ public sealed class SqliteCatalogStoreTests
             new SqliteCatalogStore(database).WriteMetadata(group, cached);
 
             var provider = new CountingProvider();
-            var records = await new HybridMetadataEnricher([provider]).EnrichAsync(
+            var enricher = new HybridMetadataEnricher([provider]);
+            var records = await enricher.EnrichAsync(
                 [group], Path.Combine(root, "legacy"), Path.Combine(root, "nfo"),
                 catalogDatabasePath: database);
 
             var result = Assert.Single(records);
             Assert.Equal("from sqlite", result.Description);
-            // A metadata-only cache hit is still rechecked online so a later
-            // build can discover artwork; cached text remains authoritative.
-            Assert.Equal(1, provider.Calls);
+            // A successful metadata-only result is a completed lookup. Later
+            // builds reuse it instead of scraping the same game again.
+            Assert.Equal(0, provider.Calls);
+            Assert.Equal(1, enricher.CatalogCacheHits);
         }
         finally
         {

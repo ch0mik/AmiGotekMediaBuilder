@@ -62,6 +62,7 @@ public static partial class GotekExporter
         }
 
         var releaseGroups = groups.ToArray();
+        var collidingGroups = FindDestinationCollisions(releaseGroups, stagingRoot, result);
         foreach (var group in releaseGroups)
         {
             var branch = string.Equals(group.Extension, "dsk", StringComparison.OrdinalIgnoreCase) ? "DSK" : "ADF";
@@ -73,7 +74,7 @@ public static partial class GotekExporter
             var group = releaseGroups[index];
             progress?.Report(new ExportProgress(index + 1, releaseGroups.Length,
                 group.ReleaseKey, group.Title ?? group.ReleaseKey));
-            if (group.QuarantineReason is not null)
+            if (group.QuarantineReason is not null || collidingGroups.Contains(index))
             {
                 result.SkippedQuarantined.Add(group.ReleaseKey);
                 continue;
@@ -86,6 +87,7 @@ public static partial class GotekExporter
             var basename = ReleaseNamer.GetBasename(group);
             var branch = string.Equals(group.Extension, "dsk", StringComparison.OrdinalIgnoreCase) ? "DSK" : "ADF";
             var folder = Path.Combine(stagingRoot, branch, GetCategory(group), basename);
+            var conflictsBeforeGroup = result.Conflicts.Count;
             for (var i = 0; i < ordered.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -94,6 +96,7 @@ public static partial class GotekExporter
                 var destination = Path.Combine(folder, diskName);
                 Copy(source, destination, verifyOnly, result, cancellationToken);
             }
+            if (result.Conflicts.Count > conflictsBeforeGroup) continue;
             var first = group.Records.FirstOrDefault();
             var generatedNfo = GotekNfoRenderer.Render(
                 group.Title, first?.Year, first?.Publisher, group.Group);
@@ -121,6 +124,45 @@ public static partial class GotekExporter
             result.ReleasesExported++;
         }
         return result;
+    }
+
+    private static HashSet<int> FindDestinationCollisions(
+        IReadOnlyList<ReleaseGroup> groups, string stagingRoot, GotekExportResult result)
+    {
+        var folders = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var paths = new Dictionary<string, (int GroupIndex, string Source)>(StringComparer.OrdinalIgnoreCase);
+        var colliding = new HashSet<int>();
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            if (group.QuarantineReason is not null) continue;
+            var branch = string.Equals(group.Extension, "dsk", StringComparison.OrdinalIgnoreCase) ? "DSK" : "ADF";
+            var folder = Path.Combine(stagingRoot, branch, GetCategory(group), ReleaseNamer.GetBasename(group));
+            if (folders.TryGetValue(folder, out var previousGroup))
+            {
+                colliding.Add(previousGroup);
+                colliding.Add(index);
+                result.Conflicts.Add($"Multiple releases target one folder: {folder}");
+            }
+            else folders.Add(folder, index);
+
+            var ordered = group.Disks.OrderBy(d => d.DiskNumber ?? int.MaxValue)
+                .Concat(group.Specials.OrderBy(d => d.SpecialRole, StringComparer.OrdinalIgnoreCase)).ToArray();
+            for (var diskIndex = 0; diskIndex < ordered.Length; diskIndex++)
+            {
+                var disk = ordered[diskIndex];
+                var source = disk.SourcePath ?? disk.SourceFilename;
+                var destination = Path.Combine(folder, ReleaseNamer.GetDiskFilename(group, disk, diskIndex, ordered.Length));
+                if (paths.TryGetValue(destination, out var previous))
+                {
+                    colliding.Add(previous.GroupIndex);
+                    colliding.Add(index);
+                    result.Conflicts.Add($"Multiple images target {destination}: {previous.Source}; {source}");
+                }
+                else paths.Add(destination, (index, source));
+            }
+        }
+        return colliding;
     }
 
     private static string GetCategory(ReleaseGroup group) => group.IsDemoscene ? "Demoscene" : "Games";

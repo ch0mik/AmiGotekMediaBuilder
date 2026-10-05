@@ -90,7 +90,8 @@ public sealed class OpenRetroProvider : IAsyncMetadataProvider, IDisposable
         string html, ReleaseGroup group, string sourceUrl, string? searchTitle = null)
     {
         var title = Field(html, "game_name") ?? Field(html, "title") ?? searchTitle ?? group.Title;
-        if (string.IsNullOrWhiteSpace(title)) return null;
+        if (string.IsNullOrWhiteSpace(title) ||
+            GameTitleMatcher.Score(group.Title ?? string.Empty, title) < 0.91) return null;
         title = CleanText(title);
         var description = Field(html, "__long_description") ?? Field(html, "description") ??
             Field(html, "comment") ?? Field(html, "__short_description");

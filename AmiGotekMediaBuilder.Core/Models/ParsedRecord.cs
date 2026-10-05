@@ -6,6 +6,8 @@ public sealed class ParsedRecord
     public required string SourceFilename { get; init; }
     public required string Extension { get; init; }
     public string? SourcePath { get; set; }
+    /// <summary>Byte length of the source image, retained for file-identification APIs.</summary>
+    public long? SourceSize { get; set; }
     /// <summary>
     /// Directory portion of the relative intake name. A non-empty value
     /// normally means that the image came from a subdirectory treated as a

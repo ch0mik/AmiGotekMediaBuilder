@@ -64,6 +64,34 @@ public sealed class DirectoryGroupingTests
     }
 
     [Fact]
+    public void KeepsGenericBootAndDataImagesInOneNamedGameFolder()
+    {
+        var records = new[] { "Games/Atlantis/Boot.adf", "Games/Atlantis/Data.adf" }
+            .Select(FilenameParser.Parse);
+
+        var group = Assert.Single(ReleaseGrouper.Group(records));
+
+        Assert.Equal("Atlantis", group.Title);
+        Assert.Equal("Atlantis", group.Folder);
+        Assert.Equal(2, group.Records.Count);
+    }
+
+    [Fact]
+    public void QuarantinesCollidingImagesInsideAnExplicitGameFolder()
+    {
+        var records = new[]
+        {
+            "Games/Aladdin/Aladdin (Disk 1 of 2).adf",
+            "Games/Aladdin/Aladdin (Disk 1 of 2)[t +3].adf",
+            "Games/Aladdin/Aladdin (Disk 2 of 2).adf"
+        }.Select(FilenameParser.Parse);
+
+        var group = Assert.Single(ReleaseGrouper.Group(records));
+
+        Assert.Contains("same export filename", group.QuarantineReason);
+    }
+
+    [Fact]
     public void DoesNotTreatAlphabeticIndexDirectoryAsGameFolder()
     {
         var records = new[]
@@ -83,6 +111,140 @@ public sealed class DirectoryGroupingTests
         Assert.All(groups, group => Assert.Null(group.Folder));
         Assert.Contains(groups, group => string.Equals(group.Title, "Arkanoid", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(groups, group => string.Equals(group.Title, "Abyss", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void SeparatesGamesInNonAlphabeticCollectionAndKeepsCompanionDisks()
+    {
+        var names = new[]
+        {
+            "AGA/1869 (1993)(Flair)(AGA)(Disk 1 of 4)(A)[cr FLT].adf",
+            "AGA/1869 (1993)(Flair)(AGA)(Disk 2 of 4)(B).adf",
+            "AGA/1869 (1993)(Flair)(AGA)(Disk 3 of 4)(C)[cr FLT].adf",
+            "AGA/1869 (1993)(Flair)(AGA)(Disk 4 of 4)(D).adf",
+            "AGA/3D Galax (1989)(Gremlin)[cr Codetapper].adf"
+        };
+        var records = names.Select(name =>
+        {
+            var record = FilenameParser.Parse(name);
+            record.SourcePath = Path.Combine("C:\\library", name.Replace('/', Path.DirectorySeparatorChar));
+            return record;
+        });
+
+        var groups = ReleaseGrouper.Group(records);
+
+        Assert.Equal(2, groups.Count);
+        Assert.All(groups, group => Assert.Null(group.Folder));
+        var game = Assert.Single(groups, group => group.Title == "1869");
+        Assert.Equal(4, game.Disks.Count);
+        Assert.True(game.IsComplete);
+        Assert.Null(game.QuarantineReason);
+        Assert.Equal("AGA", game.Chipset);
+        Assert.Equal("FLT", game.Group);
+        Assert.Contains(groups, group => group.Title == "3D Galax");
+    }
+
+    [Theory]
+    [InlineData("0-9", "1000 Miglia", "1943 The Battle of Midway")]
+    [InlineData("Quarterback", "Air Warrior", "Alien Breed")]
+    public void SeparatesDifferentTitlesRegardlessOfCollectionFolderName(
+        string folder, string firstTitle, string secondTitle)
+    {
+        var records = new[] { $"{folder}/{firstTitle}.adf", $"{folder}/{secondTitle}.adf" }
+            .Select(name =>
+            {
+                var record = FilenameParser.Parse(name);
+                record.SourcePath = Path.Combine("C:\\library", name.Replace('/', Path.DirectorySeparatorChar));
+                return record;
+            });
+
+        var groups = ReleaseGrouper.Group(records);
+
+        Assert.Equal(2, groups.Count);
+        Assert.All(groups, group => Assert.Null(group.Folder));
+        Assert.DoesNotContain(groups, group => group.Title == folder);
+    }
+
+    [Fact]
+    public void SeparatesAlternativeFirstDisksAndSharesUnambiguousCompanions()
+    {
+        var names = new[]
+        {
+            "AGA/Aladdin (1994)(Virgin)(AGA)(Disk 1 of 3)[cr PDY].adf",
+            "AGA/Aladdin (1994)(Virgin)(AGA)(Disk 1 of 3)[cr PDY][t +3 PDY].adf",
+            "AGA/Aladdin (1994)(Virgin)(AGA)(Disk 2 of 3).adf",
+            "AGA/Aladdin (1994)(Virgin)(AGA)(Disk 3 of 3).adf",
+            "AGA/1869 (1993)(Flair)(AGA).adf"
+        };
+        var records = names.Select(name =>
+        {
+            var record = FilenameParser.Parse(name);
+            record.SourcePath = Path.Combine("C:\\library", name.Replace('/', Path.DirectorySeparatorChar));
+            return record;
+        });
+
+        var groups = ReleaseGrouper.Group(records);
+        var variants = groups.Where(group => group.Title == "Aladdin").ToArray();
+
+        Assert.Equal(2, variants.Length);
+        Assert.All(variants, group =>
+        {
+            Assert.Equal(3, group.Disks.Count);
+            Assert.True(group.IsComplete);
+            Assert.Null(group.QuarantineReason);
+        });
+        Assert.Equal(2, variants.Select(ReleaseNamer.GetBasename).Distinct().Count());
+    }
+
+    [Fact]
+    public void KeepsUnpairedAlternativeImagesVisibleAsQuarantinedGroups()
+    {
+        var names = new[]
+        {
+            "AGA/Game (Disk 1 of 2)[cr A].adf",
+            "AGA/Game (Disk 1 of 2)[cr B].adf",
+            "AGA/Game (Disk 2 of 2)[cr C].adf",
+            "AGA/Game (Disk 2 of 2)[cr D].adf",
+            "AGA/Other.adf"
+        };
+        var records = names.Select(FilenameParser.Parse).ToArray();
+
+        var groups = ReleaseGrouper.Group(records);
+
+        Assert.Equal(records.Length, groups.SelectMany(group => group.Records).Distinct().Count());
+        Assert.Contains(groups, group => group.QuarantineReason?.Contains("manual review", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void SeparatesAlternativeImagesInAlphabeticCollection()
+    {
+        var records = new[]
+        {
+            "A/Aladdin (Disk 1 of 2)[cr PDY].adf",
+            "A/Aladdin (Disk 1 of 2)[cr PDY][t +3].adf",
+            "A/Aladdin (Disk 2 of 2)[cr PDY].adf"
+        }.Select(FilenameParser.Parse);
+
+        var groups = ReleaseGrouper.Group(records);
+
+        Assert.Equal(2, groups.Count);
+        Assert.All(groups, group => Assert.True(group.IsComplete));
+        Assert.Equal(2, groups.Select(ReleaseNamer.GetBasename).Distinct().Count());
+    }
+
+    [Fact]
+    public void GivesDifferentReleasesUniqueOutputNamesAcrossCollectionFolders()
+    {
+        var records = new[]
+        {
+            "A/Same.adf", "A/Other.adf",
+            "AGA/Same.adf", "AGA/Different.adf"
+        }.Select(FilenameParser.Parse);
+
+        var groups = ReleaseGrouper.Group(records);
+
+        Assert.Equal(groups.Count, groups.Select(ReleaseNamer.GetBasename)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     [Fact]

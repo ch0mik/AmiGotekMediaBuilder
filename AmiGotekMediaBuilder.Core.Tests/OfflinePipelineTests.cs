@@ -10,6 +10,21 @@ namespace AmiGotekMediaBuilder.Core.Tests;
 public sealed class OfflinePipelineTests
 {
     [Fact]
+    public void OfflineEnrichmentHonorsCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var group = new AmiGotekMediaBuilder.Core.Models.ReleaseGroup
+        {
+            ReleaseKey = "cancelled", Title = "Cancelled", Extension = "adf"
+        };
+
+        Assert.Throws<OperationCanceledException>(() => new OfflineEnricher().Enrich(
+            [group], Path.Combine(Path.GetTempPath(), "amiga-cancel-" + Guid.NewGuid().ToString("N")),
+            cancellationToken: cancellation.Token));
+    }
+
+    [Fact]
     public void ScansGroupsEnrichesAndExportsWithoutNetwork()
     {
         var root = Path.Combine(Path.GetTempPath(), "amiga-e2e-" + Guid.NewGuid().ToString("N"));

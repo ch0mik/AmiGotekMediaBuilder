@@ -44,6 +44,7 @@ static Task<int> MainAsync(string[] args)
         {
             var record = FilenameParser.Parse(s.Filename);
             record.SourcePath = s.Path;
+            record.SourceSize = s.Size;
             record.SourceSha256 = s.Sha256;
             return record;
         }).ToArray();
@@ -304,8 +305,8 @@ static void PrintHelp() => Console.WriteLine("""
     Commands:
       scan --library-root <path> [--config <file.toml>] [--original-dir <path>] [--json]
       build --library-root <path> [--config <file.toml>] [--original-dir <path>] [--json]
-        [--online]  (public Hasheous + Playmatch + OpenRetro + Hall of Light + Wikipedia;
-                     optional local GameBase DB)
+        [--online]  (GameBase + ScreenScraper + OpenRetro + TheGamesDB + Libretro;
+                     credentialed sources use environment variables)
         [--gamebase-db <path>]  (SQLite generated from a GameBase MDB database)
       export --library-root <path> --export-gate-acknowledged
         [--run-id <id>] [--verified-artwork-width <n>] [--verified-artwork-height <n>]

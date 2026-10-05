@@ -25,6 +25,8 @@ public sealed class ReleaseGroup
     public bool HasMainDisk => Disks.Count > 0;
     public string? QuarantineReason { get; set; }
     public string? Folder { get; set; }
+    /// <summary>Stable output suffix for distinct source variants of one release.</summary>
+    public string? OutputVariant { get; set; }
     /// <summary>
     /// Retained for source-grouping compatibility with dash-numbered sets.
     /// Export uses canonical TOSEC disk markers.

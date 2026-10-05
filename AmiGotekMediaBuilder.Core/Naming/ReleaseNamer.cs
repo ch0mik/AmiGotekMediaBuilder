@@ -17,6 +17,7 @@ public static class ReleaseNamer
         if (!string.IsNullOrWhiteSpace(group.Language)) parts.Add($"lang {group.Language}");
         if (!string.IsNullOrWhiteSpace(group.Version)) parts.Add($"ver {group.Version}");
         if (!string.IsNullOrWhiteSpace(group.AltMarker)) parts.Add($"alt {group.AltMarker}");
+        if (!string.IsNullOrWhiteSpace(group.OutputVariant)) parts.Add($"variant {group.OutputVariant}");
         return Sanitize(string.Join(' ', parts));
     }
 

@@ -15,7 +15,8 @@ public sealed class OfflineEnricher(IMetadataProvider? provider = null)
         IEnumerable<ReleaseGroup> groups,
         string cacheDirectory,
         string? nfoDirectory = null,
-        string? catalogDatabasePath = null)
+        string? catalogDatabasePath = null,
+        CancellationToken cancellationToken = default)
     {
         var cache = new MetadataCache(cacheDirectory);
         var catalog = string.IsNullOrWhiteSpace(catalogDatabasePath)
@@ -30,6 +31,7 @@ public sealed class OfflineEnricher(IMetadataProvider? provider = null)
             : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(nfoDirectory))!, "artwork-processed");
         foreach (var group in groups)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var cached = catalog?.ReadMetadata(group, CatalogNamespace.For(group));
             var legacy = cache.Read(group.ReleaseKey);
             if (catalog is not null && legacy is not null)
@@ -55,6 +57,7 @@ public sealed class OfflineEnricher(IMetadataProvider? provider = null)
             results.Add(record);
             if (nfoDirectory is not null)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 Directory.CreateDirectory(nfoDirectory);
                 var basename = Naming.ReleaseNamer.GetBasename(group);
                 var nfo = GotekNfoRenderer.Render(record.Title, record.Year, record.Publisher, record.Description);

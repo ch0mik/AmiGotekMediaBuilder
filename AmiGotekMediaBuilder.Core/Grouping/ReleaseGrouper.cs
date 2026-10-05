@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using AmiGotekMediaBuilder.Core.Models;
+using AmiGotekMediaBuilder.Core.Naming;
 
 namespace AmiGotekMediaBuilder.Core.Grouping;
 
@@ -17,24 +18,42 @@ public static partial class ReleaseGrouper
     public static IReadOnlyList<ReleaseGroup> Group(IEnumerable<ParsedRecord> records)
     {
         ArgumentNullException.ThrowIfNull(records);
-        var groups = records
-            .Select(record => (Record: record, Key: BuildGroupingKey(record)))
+        var input = records.ToArray();
+        // A directory is a game folder only when its filenames describe one
+        // title. Collection directories such as AGA or 0-9 contain many titles
+        // and must never become one release.
+        var collectionDirectories = input
+            .Where(record => GetDirectoryGroupKey(record) is not null)
+            .GroupBy(record => GetDirectoryGroupKey(record)!, StringComparer.OrdinalIgnoreCase)
+            .Where(directory => directory.Select(record => NormalizeTitle(record.Title ?? string.Empty))
+                .Where(title => title.Length > 0 && !IsGenericDiskTitle(title))
+                .Distinct(StringComparer.Ordinal).Take(2).Count() > 1)
+            .Select(directory => directory.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var groups = input
+            .Select(record => (Record: record, Key: BuildGroupingKey(record, collectionDirectories)))
             .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(g =>
+            .SelectMany(g => SplitReleaseVariants(g.Key, g.Select(item => item.Record).ToArray()))
+            .Select(partition =>
             {
-                var first = g.First().Record;
-                var directoryFolder = GetDirectoryFolder(first);
-                var allRecords = g.Select(item => item.Record).ToArray();
+                var allRecords = partition.Records;
+                var first = partition.Anchor ?? allRecords.FirstOrDefault(record => record.DiskNumber == 1 &&
+                    !string.IsNullOrWhiteSpace(record.Group)) ??
+                    allRecords.FirstOrDefault(record => !string.IsNullOrWhiteSpace(record.Group)) ??
+                    allRecords[0];
+                var directoryFolder = collectionDirectories.Contains(GetDirectoryGroupKey(first) ?? string.Empty)
+                    ? null : GetDirectoryFolder(first);
                 var result = new ReleaseGroup
                 {
                     // A subdirectory is an explicit game boundary. Its name
                     // is therefore the authoritative title when filenames
                     // inside it use generic disk labels such as "Atlantis -
                     // 01.adf" (the folder may carry the full release name).
-                    ReleaseKey = g.Key, Title = directoryFolder is null ? first.Title : CanonicalDirectoryTitle(directoryFolder), Edition = first.Edition,
+                    ReleaseKey = partition.Key, Title = directoryFolder is null ? first.Title : CanonicalDirectoryTitle(directoryFolder), Edition = first.Edition,
                     Group = first.Group, Chipset = first.Chipset, Language = first.Language,
                     Version = first.Version, AltMarker = first.AltMarker, Extension = first.Extension,
                     SourceSha256 = first.SourceSha256, Folder = directoryFolder,
+                    OutputVariant = partition.OutputVariant,
                     // Export uses canonical TOSEC names. Parsed markers retain
                     // their role in disk ordering and output filenames.
                     UseSequentialDiskNames = true,
@@ -44,11 +63,22 @@ public static partial class ReleaseGrouper
                 result.Disks.AddRange(allRecords.Where(r => !r.SpecialDisk).OrderBy(r => r.DiskNumber ?? int.MaxValue));
                 result.Specials.AddRange(allRecords.Where(r => r.SpecialDisk));
                 result.IsComplete = IsComplete(result.Disks);
+                if (partition.Ambiguous)
+                    AppendReason(result, "Multiple alternative disks could not be paired safely; manual review required.");
                 return result;
             }).ToList();
+        DisambiguateOutputNames(groups);
         FlagNearDuplicates(groups);
         foreach (var group in groups)
         {
+            var ordered = group.Disks.OrderBy(disk => disk.DiskNumber ?? int.MaxValue)
+                .Concat(group.Specials.OrderBy(disk => disk.SpecialRole, StringComparer.OrdinalIgnoreCase))
+                .ToArray();
+            var outputNames = ordered.Select((disk, index) =>
+                ReleaseNamer.GetDiskFilename(group, disk, index, ordered.Length));
+            if (outputNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != ordered.Length)
+                AppendReason(group, "Multiple images would receive the same export filename; manual review required.");
+
             var missingDisks = GetMissingDeclaredDisks(group.Disks);
             if (missingDisks.Count > 0)
             {
@@ -71,7 +101,89 @@ public static partial class ReleaseGrouper
         return groups;
     }
 
-    private static string BuildGroupingKey(ParsedRecord record)
+    private sealed record GroupPartition(string Key, ParsedRecord[] Records,
+        string? OutputVariant = null, bool Ambiguous = false, ParsedRecord? Anchor = null);
+
+    private static IEnumerable<GroupPartition> SplitReleaseVariants(string key, ParsedRecord[] records)
+    {
+        // An explicit single-game folder remains authoritative. All other
+        // release groups may contain alternate dumps of the same disk number.
+        if (key.StartsWith("directory:", StringComparison.Ordinal) ||
+            key.StartsWith("demoscene:directory:", StringComparison.Ordinal) ||
+            records.Length < 2)
+        {
+            yield return new(key, records);
+            yield break;
+        }
+
+        var mainDisks = records.Where(record => !record.SpecialDisk).ToArray();
+        var duplicate = mainDisks.GroupBy(record => record.DiskNumber)
+            .Where(group => group.Count() > 1)
+            .OrderBy(group => group.Key ?? int.MaxValue)
+            .FirstOrDefault();
+        if (duplicate is null)
+        {
+            yield return new(key, records);
+            yield break;
+        }
+
+        var anchors = duplicate.OrderBy(record => record.SourceFilename, StringComparer.OrdinalIgnoreCase).ToArray();
+        var assigned = new HashSet<ParsedRecord>();
+        foreach (var anchor in anchors)
+        {
+            var selected = new List<ParsedRecord> { anchor };
+            var ambiguous = false;
+            foreach (var diskSet in mainDisks.Except(anchors)
+                         .GroupBy(record => record.DiskNumber))
+            {
+                if (diskSet.Count() == 1)
+                {
+                    selected.Add(diskSet.First());
+                    continue;
+                }
+
+                var matching = diskSet.Where(record => !string.IsNullOrWhiteSpace(anchor.Group) &&
+                    string.Equals(record.Group, anchor.Group, StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (matching.Length == 1)
+                    selected.Add(matching[0]);
+                else
+                {
+                    var common = diskSet.Where(record => string.IsNullOrWhiteSpace(record.Group)).ToArray();
+                    if (common.Length == 1) selected.Add(common[0]);
+                    else ambiguous = true;
+                }
+            }
+            selected.AddRange(records.Where(record => record.SpecialDisk));
+            foreach (var record in selected) assigned.Add(record);
+            var variant = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(anchor.SourceFilename)))
+                .ToLowerInvariant()[..8];
+            yield return new($"{key}:variant:{variant}", selected.ToArray(), variant, ambiguous, anchor);
+        }
+        foreach (var unassigned in records.Where(record => !assigned.Contains(record)))
+        {
+            var variant = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(unassigned.SourceFilename)))
+                .ToLowerInvariant()[..8];
+            yield return new($"{key}:unpaired:{variant}", [unassigned], variant, Ambiguous: true,
+                Anchor: unassigned);
+        }
+    }
+
+    private static void DisambiguateOutputNames(List<ReleaseGroup> groups)
+    {
+        foreach (var collision in groups.GroupBy(ReleaseNamer.GetBasename, StringComparer.OrdinalIgnoreCase)
+                     .Where(group => group.Count() > 1))
+        {
+            foreach (var group in collision)
+            {
+                var tag = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(group.ReleaseKey)))
+                    .ToLowerInvariant()[..12];
+                group.OutputVariant = string.IsNullOrWhiteSpace(group.OutputVariant)
+                    ? tag : $"{group.OutputVariant}-{tag}";
+            }
+        }
+    }
+
+    private static string BuildGroupingKey(ParsedRecord record, HashSet<string> collectionDirectories)
     {
         // A relative subdirectory is an explicit collection boundary: all
         // images directly in that directory belong to one game, even when a
@@ -79,6 +191,17 @@ public static partial class ReleaseGrouper
         // directories (A-Z) are the collection layout, not game boundaries;
         // files there continue to use TOSEC/filename identity.
         var directory = GetDirectoryGroupKey(record);
+        if (directory is not null && collectionDirectories.Contains(directory))
+        {
+            var collectionDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(directory)))
+                .ToLowerInvariant();
+            // Crack tags are often present on disk 1 only. Keep its companion
+            // disks together, while retaining distinct titles and versions.
+            var identity = string.Join('|', NormalizeTitle(record.Title ?? string.Empty),
+                NormalizeTitle(record.Edition ?? string.Empty), NormalizeTitle(record.Version ?? string.Empty),
+                record.Extension.ToLowerInvariant());
+            return $"collection:{collectionDigest}:{identity}";
+        }
         // Preserve existing game keys for cache/catalog compatibility. Only
         // demoscene records get a namespace of their own, preventing a demo
         // in the optional intake from colliding with a game of the same name.
@@ -133,6 +256,12 @@ public static partial class ReleaseGrouper
 
     private static string NormalizePath(string value) => value.Replace('\\', '/').Trim('/');
 
+    private static bool IsGenericDiskTitle(string title) =>
+        title is "boot" or "data" or "program" or "save" or "intro" or "utility" or
+            "character" or "companion" ||
+        (title.StartsWith("disk", StringComparison.Ordinal) && title[4..].All(char.IsDigit)) ||
+        (title.StartsWith("disc", StringComparison.Ordinal) && title[4..].All(char.IsDigit));
+
     private static string CanonicalDirectoryTitle(string folder)
     {
         // TOSEC/crack collections often use a compact folder such as
@@ -168,17 +297,21 @@ public static partial class ReleaseGrouper
 
     private static void FlagNearDuplicates(List<ReleaseGroup> groups)
     {
-        var titled = groups.Where(g => !string.IsNullOrWhiteSpace(g.Title)).ToArray();
+        var titled = groups.Where(g => !string.IsNullOrWhiteSpace(g.Title))
+            .Select(group => (Group: group, Normalized: NormalizeTitle(group.Title!)))
+            .ToArray();
         for (var i = 0; i < titled.Length; i++)
         {
-            var normalized = NormalizeTitle(titled[i].Title!);
+            var normalized = titled[i].Normalized;
             for (var j = i + 1; j < titled.Length; j++)
             {
-                var other = NormalizeTitle(titled[j].Title!);
+                var other = titled[j].Normalized;
                 if (normalized.Length == 0 || other.Length == 0 || normalized == other ||
+                    Math.Abs(normalized.Length - other.Length) >
+                    (1 - NearDuplicateRatio) * Math.Max(normalized.Length, other.Length) ||
                     Similarity(normalized, other) < NearDuplicateRatio) continue;
-                AppendReason(titled[i], $"Near-duplicate spelling of the same game: source spelling variant(s) '{titled[i].Title}', '{titled[j].Title}' match closely but differ. Human review required; not auto-merged.");
-                AppendReason(titled[j], $"Near-duplicate spelling of the same game: source spelling variant(s) '{titled[i].Title}', '{titled[j].Title}' match closely but differ. Human review required; not auto-merged.");
+                AppendReason(titled[i].Group, $"Near-duplicate spelling of the same game: source spelling variant(s) '{titled[i].Group.Title}', '{titled[j].Group.Title}' match closely but differ. Human review required; not auto-merged.");
+                AppendReason(titled[j].Group, $"Near-duplicate spelling of the same game: source spelling variant(s) '{titled[i].Group.Title}', '{titled[j].Group.Title}' match closely but differ. Human review required; not auto-merged.");
             }
         }
     }

@@ -27,6 +27,61 @@ public sealed class GotekExporterTests
     }
 
     [Fact]
+    public void SkipsBothReleasesWhenTheirOutputFoldersCollide()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amiga-export-collision-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var groups = new List<ReleaseGroup>();
+            foreach (var suffix in new[] { "a", "b" })
+            {
+                var source = Path.Combine(root, suffix + ".adf");
+                File.WriteAllBytes(source, suffix == "a" ? [1] : [2]);
+                var record = new ParsedRecord { SourceFilename = Path.GetFileName(source),
+                    SourcePath = source, Extension = "adf", Title = "Same" };
+                var group = new ReleaseGroup { ReleaseKey = suffix, Title = "Same", Extension = "adf" };
+                group.Records.Add(record);
+                group.Disks.Add(record);
+                groups.Add(group);
+            }
+
+            var result = GotekExporter.Export(groups, root, Path.Combine(root, "staging"), "run",
+                upstreamTaskClosed: true, verifiedArtworkWidth: 320, verifiedArtworkHeight: 240);
+
+            Assert.Equal(0, result.ReleasesExported);
+            Assert.NotEmpty(result.Conflicts);
+            Assert.Equal(2, result.SkippedQuarantined.Count);
+            Assert.Empty(result.FilesWritten);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExportHonorsCancellationBeforeWritingARelease()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amiga-export-cancel-" + Guid.NewGuid().ToString("N"));
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            cancellation.Cancel();
+            var group = new ReleaseGroup { ReleaseKey = "cancelled", Title = "Cancelled", Extension = "adf" };
+
+            Assert.Throws<OperationCanceledException>(() => GotekExporter.Export(
+                [group], root, Path.Combine(root, "staging"), "run",
+                upstreamTaskClosed: true, verifiedArtworkWidth: 320, verifiedArtworkHeight: 240,
+                cancellationToken: cancellation.Token));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ExportsGamesCategoryAndRtfmAlongsideDiskNfoAndArtwork()
     {
         var root = Path.Combine(Path.GetTempPath(), "amiga-export-" + Guid.NewGuid().ToString("N"));

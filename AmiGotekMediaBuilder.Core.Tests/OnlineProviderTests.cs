@@ -9,11 +9,16 @@ namespace AmiGotekMediaBuilder.Core.Tests;
 public sealed class OnlineProviderTests
 {
     [Fact]
-    public void DefaultChainContainsOnlyCredentialFreeProviders()
+    public void DefaultChainUsesDedicatedAmigaGameSources()
     {
-        Assert.Equal(
-            new[] { "hasheous", "playmatch", "openretro", "gamebase", "hall-of-light", "wikipedia" },
-            OnlineProviderFactory.CreateDefault().Select(provider => provider.Id));
+        var ids = OnlineProviderFactory.CreateDefault().Select(provider => provider.Id).ToArray();
+        Assert.Equal("gamebase", ids[0]);
+        Assert.Contains("openretro", ids);
+        Assert.Equal("libretro", ids[^1]);
+        Assert.DoesNotContain("hasheous", ids);
+        Assert.DoesNotContain("playmatch", ids);
+        Assert.DoesNotContain("hall-of-light", ids);
+        Assert.DoesNotContain("wikipedia", ids);
     }
 
     [Fact]
@@ -164,50 +169,6 @@ public sealed class OnlineProviderTests
     }
 
     [Fact]
-    public async Task ParsesGenericJsonResultThroughSafeTransport()
-    {
-        using var client = new SafeHttpClient(handler: new JsonHandler("""{"results":[{"title":"Example Game","year":1992,"publisher":"Acme"}]}"""));
-        var provider = new PlaymatchProvider(new OnlineProviderOptions("ignored", "https://example.test"), client);
-        var group = new ReleaseGroup { ReleaseKey = "example", Title = "Example Game", Extension = "adf" };
-        var result = await provider.ResolveAsync(group);
-        Assert.NotNull(result);
-        Assert.Equal("Example Game", result!.Title);
-        Assert.Equal("1992", result.Year);
-        Assert.Equal("playmatch", result.Provider);
-    }
-
-    [Fact]
-    public async Task ParsesArtworkUrlFromCommonCoverShape()
-    {
-        using var client = new SafeHttpClient(handler: new JsonHandler(
-            "{\"results\":[{\"name\":\"Example Game\",\"cover\":{\"url\":\"//images.example/cover/abc.jpg\"}}]}"));
-        var provider = new JsonMetadataProvider(new OnlineProviderOptions("public-gateway", "https://example.test"), client);
-        var group = new ReleaseGroup { ReleaseKey = "example", Title = "Example Game", Extension = "adf" };
-
-        var result = await provider.ResolveAsync(group);
-
-        Assert.Equal("https://images.example/cover/abc.jpg", result!.ArtworkUrl);
-        Assert.Equal("public-gateway", result.ArtworkProvider);
-    }
-
-    [Fact]
-    public async Task WikipediaProviderReturnsRelevantAmigaArtwork()
-    {
-        using var client = new SafeHttpClient(handler: new JsonHandler(
-            "{\"query\":{\"pages\":[{\"pageid\":1,\"title\":\"Example Game\",\"extract\":\"Example Game is an adventure game released for the Amiga home computer.\",\"fullurl\":\"https://en.wikipedia.org/wiki/Example_Game\",\"original\":{\"source\":\"https://upload.wikimedia.org/example.jpg\"}}]}}"));
-        using var provider = new WikipediaProvider("https://example.test", client);
-        var group = new ReleaseGroup { ReleaseKey = "example", Title = "Example Game", Extension = "adf" };
-
-        var result = await provider.ResolveAsync(group);
-
-        Assert.NotNull(result);
-        Assert.Equal("Example Game", result!.Title);
-        Assert.Equal("wikipedia", result.Provider);
-        Assert.Equal("https://upload.wikimedia.org/example.jpg", result.ArtworkUrl);
-        Assert.Equal("https://en.wikipedia.org/wiki/Example_Game", result.ArtworkSourceUrl);
-    }
-
-    [Fact]
     public async Task OpenRetroParsesAmigaGameAndFrontArtwork()
     {
         const string hash = "63dd0bbbefeabd33d23e1f825f3d2ea360e15fd4";
@@ -244,8 +205,152 @@ public sealed class OnlineProviderTests
 
         var result = await new OnlineMetadataChain(new IAsyncMetadataProvider[] { first, second }).ResolveAsync(group);
 
-        Assert.Equal("second", result!.Provider);
+        Assert.Equal("first", result!.Provider);
+        Assert.Equal("second", result.ArtworkProvider);
         Assert.Equal("https://images.example/example.jpg", result.ArtworkUrl);
+    }
+
+    [Fact]
+    public async Task ProviderChainReportsEveryProviderTriedUntilArtworkIsFound()
+    {
+        var group = new ReleaseGroup { ReleaseKey = "example", Title = "Example Game", Extension = "adf" };
+        var first = new StubProvider(new MetadataRecord("example", "Example Game", null, null, null, "first", DateTimeOffset.UtcNow));
+        var second = new StubProvider(new MetadataRecord("example", "Example Game", null, null, null, "second", DateTimeOffset.UtcNow)
+        {
+            ArtworkUrl = "https://images.example/example.jpg", ArtworkProvider = "second"
+        });
+        var third = new StubProvider(new MetadataRecord("example", "Example Game", "1992", "Acme", null,
+            "third", DateTimeOffset.UtcNow));
+        var reported = new List<string>();
+
+        await new OnlineMetadataChain([first, second, third]).ResolveAsync(group,
+            providerCompleted: (provider, result) => reported.Add($"{provider}:{(result is null ? "miss" : "match")}"));
+
+        Assert.Equal(["first:match", "second:match", "third:match"], reported);
+    }
+
+    [Fact]
+    public async Task ArtworkFailureFallsThroughToNextProvider()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amiga-artwork-fallthrough-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var invalid = Path.Combine(root, "invalid.jpg");
+            var valid = Path.Combine(root, "valid.png");
+            await File.WriteAllTextAsync(invalid, "not an image");
+            await File.WriteAllBytesAsync(valid, [137, 80, 78, 71, 13, 10, 26, 10]);
+            var group = new ReleaseGroup { ReleaseKey = "fallback", Title = "Fallback Game", Extension = "adf" };
+            var first = new CountingArtworkProvider(invalid, "broken");
+            var second = new CountingArtworkProvider(valid, "working");
+
+            var result = Assert.Single(await new HybridMetadataEnricher([first, second]).EnrichAsync(
+                [group], Path.Combine(root, "metadata"), Path.Combine(root, "assets", "nfo")));
+
+            Assert.Equal("working", result.ArtworkProvider);
+            Assert.NotNull(result.ArtworkPath);
+            Assert.True(File.Exists(result.ArtworkPath));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RemovedProviderCacheIsReplacedByNewValidatedArtwork()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amiga-retired-provider-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var metadataDirectory = Path.Combine(root, "catalog");
+            var nfoDirectory = Path.Combine(root, "assets", "nfo");
+            var originalDirectory = Path.Combine(root, "assets", "artwork-original");
+            Directory.CreateDirectory(originalDirectory);
+            var oldArtwork = Path.Combine(originalDirectory, "Cache Game.jpg");
+            await File.WriteAllBytesAsync(oldArtwork, [0xff, 0xd8, 0xff]);
+            await File.WriteAllTextAsync(oldArtwork + ".source.json", "{\"provider\":\"wikipedia\"}");
+            new MetadataCache(metadataDirectory).Write(new MetadataRecord(
+                "cache-game", "Wrong cached title", null, null, null, "wikipedia", DateTimeOffset.UtcNow)
+            {
+                ArtworkPath = oldArtwork, ArtworkProvider = "wikipedia"
+            });
+            var replacement = Path.Combine(root, "replacement.png");
+            await File.WriteAllBytesAsync(replacement, [137, 80, 78, 71, 13, 10, 26, 10]);
+            var group = new ReleaseGroup { ReleaseKey = "cache-game", Title = "Cache Game", Extension = "adf" };
+
+            var result = Assert.Single(await new HybridMetadataEnricher([
+                new CountingArtworkProvider(replacement, "new-source")
+            ]).EnrichAsync([group], metadataDirectory, nfoDirectory));
+
+            Assert.Equal("new-source", result.Provider);
+            Assert.Equal("new-source", result.ArtworkProvider);
+            Assert.EndsWith(".png", result.ArtworkPath, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(oldArtwork + ".superseded"));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ScreenScraperUsesFileHashesAndParsesAmigaCover()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "screenscraper-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var disk = Path.Combine(root, "Lotus.adf");
+            await File.WriteAllBytesAsync(disk, [1, 2, 3, 4]);
+            Uri? requested = null;
+            const string json = """
+                {"response":{"jeu":{"id":"42","nom":"Lotus Esprit Turbo Challenge",
+                "noms":{"nom_en":"Lotus Esprit Turbo Challenge"},"dates":{"date_wor":"1990-01-01"},
+                "editeur":"Gremlin","synopsis":{"synopsis_en":"A racing game."},
+                "medias":{"media_boitiers_2d":{"media_boitier_2d_eu":"https://img.example/lotus.png"}}}}}
+                """;
+            using var client = new SafeHttpClient(handler: new CapturingJsonHandler(json, uri => requested = uri));
+            using var provider = new ScreenScraperProvider(new ScreenScraperOptions(
+                "dev", "secret", BaseUrl: "https://example.test/api2"), client);
+            var group = new ReleaseGroup { ReleaseKey = "lotus", Title = "Lotus Esprit Turbo Challenge", Extension = "adf" };
+            group.Records.Add(new ParsedRecord { SourceFilename = "Lotus.adf", SourcePath = disk,
+                SourceSize = 4, Extension = "adf" });
+
+            var result = await provider.ResolveAsync(group);
+
+            Assert.NotNull(result);
+            Assert.Equal("1990", result!.Year);
+            Assert.Equal("https://img.example/lotus.png", result.ArtworkUrl);
+            Assert.Contains("sha1=", requested!.Query, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("md5=", requested.Query, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("systemeid=64", requested.Query, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TheGamesDbRejectsLooseTitleAndParsesFrontBoxArt()
+    {
+        const string json = """
+            {"data":{"games":[{"id":7,"game_title":"The Settlers","release_date":"1993-01-01",
+            "overview":"Build a settlement.","publishers":["Blue Byte"]}]},
+            "include":{"boxart":{"base_url":{"original":"https://cdn.example/original"},
+            "data":{"7":[{"side":"front","filename":"boxart/7.jpg"}]}}}}
+            """;
+        using var client = new SafeHttpClient(handler: new JsonHandler(json));
+        using var provider = new TheGamesDbProvider(new TheGamesDbOptions("key", "https://example.test/v1"), client);
+        var group = new ReleaseGroup { ReleaseKey = "settlers", Title = "Settlers, The", Extension = "adf" };
+
+        var result = await provider.ResolveAsync(group);
+
+        Assert.NotNull(result);
+        Assert.Equal("Blue Byte", result!.Publisher);
+        Assert.Equal("https://cdn.example/original/boxart/7.jpg", result.ArtworkUrl);
     }
 
     private sealed class JsonHandler(string json) : HttpMessageHandler
@@ -255,6 +360,15 @@ public sealed class OnlineProviderTests
             {
                 Content = new StringContent(json)
             });
+    }
+
+    private sealed class CapturingJsonHandler(string json, Action<Uri> capture) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            capture(request.RequestUri!);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) });
+        }
     }
 
     private sealed class RoutingHandler(
@@ -277,9 +391,9 @@ public sealed class OnlineProviderTests
         public Task<MetadataRecord?> ResolveAsync(ReleaseGroup group, CancellationToken cancellationToken = default) => Task.FromResult<MetadataRecord?>(result);
     }
 
-    private sealed class CountingArtworkProvider(string artworkPath) : IAsyncMetadataProvider
+    private sealed class CountingArtworkProvider(string artworkPath, string id = "test-provider") : IAsyncMetadataProvider
     {
-        public string Id => "test-provider";
+        public string Id => id;
         public int Calls { get; private set; }
 
         public Task<MetadataRecord?> ResolveAsync(ReleaseGroup group, CancellationToken cancellationToken = default)

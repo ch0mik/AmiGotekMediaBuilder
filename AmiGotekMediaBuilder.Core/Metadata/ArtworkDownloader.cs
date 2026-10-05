@@ -47,10 +47,12 @@ public sealed class ArtworkDownloader(SafeHttpClient? client = null) : IDisposab
         Directory.CreateDirectory(processedDirectory);
 
         var existing = FindExistingMaster(originalDirectory, basename);
+        var existingFromAnotherProvider = existing is not null &&
+                                          HasDifferentProvider(existing, metadata);
         byte[] bytes;
         string extension;
         var downloaded = false;
-        if (existing is not null)
+        if (existing is not null && !existingFromAnotherProvider)
         {
             bytes = await File.ReadAllBytesAsync(existing, cancellationToken);
             try
@@ -70,6 +72,7 @@ public sealed class ArtworkDownloader(SafeHttpClient? client = null) : IDisposab
         {
             bytes = [];
             extension = string.Empty;
+            if (existingFromAnotherProvider) existing = null;
         }
 
         var localArtworkPath = string.IsNullOrWhiteSpace(metadata.ArtworkPath)
@@ -84,6 +87,7 @@ public sealed class ArtworkDownloader(SafeHttpClient? client = null) : IDisposab
             if (bytes.Length == 0) throw new InvalidOperationException("local artwork file is empty");
             extension = DetectExtension(bytes, localArtworkPath!);
             existing = Path.Combine(originalDirectory, basename + extension);
+            RetireDifferentExtension(originalDirectory, basename, extension);
             AtomicWrite(existing, bytes);
             downloaded = true;
         }
@@ -97,6 +101,7 @@ public sealed class ArtworkDownloader(SafeHttpClient? client = null) : IDisposab
             if (bytes.Length == 0) throw new InvalidOperationException("artwork download returned an empty body");
             extension = DetectExtension(bytes, metadata.ArtworkUrl!);
             existing = Path.Combine(originalDirectory, basename + extension);
+            RetireDifferentExtension(originalDirectory, basename, extension);
             AtomicWrite(existing, bytes);
             downloaded = true;
         }
@@ -153,6 +158,37 @@ public sealed class ArtworkDownloader(SafeHttpClient? client = null) : IDisposab
         catch (JsonException) { return false; }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
+    }
+
+    private static bool HasDifferentProvider(string imagePath, MetadataRecord metadata)
+    {
+        var expected = metadata.ArtworkProvider ?? metadata.Provider;
+        var sidecar = imagePath + ".source.json";
+        if (string.IsNullOrWhiteSpace(expected) || !File.Exists(sidecar)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(sidecar));
+            return document.RootElement.TryGetProperty("provider", out var value) &&
+                   value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } actual &&
+                   !actual.Equals(expected, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException) { return false; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    private static void RetireDifferentExtension(string directory, string basename, string keepExtension)
+    {
+        foreach (var extension in new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" })
+        {
+            if (extension.Equals(keepExtension, StringComparison.OrdinalIgnoreCase)) continue;
+            var path = Path.Combine(directory, basename + extension);
+            if (!File.Exists(path)) continue;
+            var retired = path + ".superseded";
+            File.Move(path, retired, overwrite: true);
+            var sidecar = path + ".source.json";
+            if (File.Exists(sidecar)) File.Move(sidecar, retired + ".source.json", overwrite: true);
+        }
     }
 
     private static bool HasDemosceneValue(JsonElement root, string property) =>

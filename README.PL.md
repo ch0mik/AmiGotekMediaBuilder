@@ -7,6 +7,14 @@ obejmuje skanowanie plików ADF/DSK/ZIP, parsowanie nazw, grupowanie wydań,
 katalog JSONL, wielosystemowy cache SQLite metadanych i artworku, pobieranie
 online, NFO oraz bezpieczny eksport do stagingu Gotek.
 
+## Ostatnie zmiany
+
+W ostatnim tygodniu przebudowano grupowanie gier, cały pipeline pobierania
+metadanych i artworku oraz obsługę lokalnego cache. GUI otrzymało również
+anulowanie długich operacji przyciskiem **Cancel**. Pełny opis znajduje się w
+[podsumowaniu zmian z 29.09–05.10.2026](CHANGES-2026-09-29--2026-10-05.md).
+Dostępne jest również angielskie [podsumowanie zmian od 14.09.2026](CHANGES-SINCE-2026-09-14.md).
+
 ## Wymagania
 
 - Windows 10/11, Linux (desktop) lub macOS dla GUI (Avalonia);
@@ -156,10 +164,12 @@ z fallbackiem do `release_key` dla starych lub niepełnych rekordów.
 
 Podczas pierwszego `build --online` brakujące hashe są wysyłane do providerów,
 a opisy, wyniki providerów i lokalne ścieżki artworków są zapisywane w
-SQLite. Przy następnym buildzie pipeline działa cache-first: poprawny rekord
-metadanych i istniejący artwork są używane lokalnie, bez ponownego zapytania
-HTTP i pobierania obrazu. Zmieniona nazwa pliku lub katalogu nie powoduje
-ponownego pobrania, jeśli hash się nie zmienił.
+SQLite. Przy następnym buildzie pipeline działa cache-first: każdy poprawny
+wynik providera — również wynik zawierający metadata bez artworku — jest
+używany lokalnie bez ponownego scrapowania. Zapisany URL może posłużyć do
+odtworzenia brakującego lokalnego obrazka bez ponownego wyszukiwania gry.
+Zmieniona nazwa pliku lub katalogu nie powoduje ponownego pobrania, jeśli hash
+się nie zmienił.
 
 Przykładowe podsumowanie online:
 
@@ -178,13 +188,18 @@ wewnętrznym cache’em wyników providerów.
 
 ## Providery online
 
-Flaga `--online` włącza wbudowany łańcuch publicznych providerów: Hasheous,
-Playmatch, OpenRetro, Hall of Light i Wikipedię. Nie wymagają one logowania ani credentiali w
-tym projekcie. Gdy żaden provider nie znajdzie dopasowania, metadata pochodzi z
-fallbacku filename-only, a artwork z `default-artwork`. Adapter oczekuje
-odpowiedzi JSON z polem `results`, `games`, `data` lub `items` oraz `title`/`name`.
-URL obrazka może być zwrócony jako `artwork_url`, `image_url`, `cover.url`,
-`images[]` albo `screenshots[]`.
+Flaga `--online` włącza pipeline przeznaczony dla gier: lokalny GameBase,
+ScreenScraper, OpenRetro, TheGamesDB oraz artwork Libretro. ScreenScraper jest
+włączany przez `SCREENSCRAPER_DEV_ID` i `SCREENSCRAPER_DEV_PASSWORD`;
+opcjonalne konto użytkownika konfiguruje się przez `SCREENSCRAPER_USER` i
+`SCREENSCRAPER_PASSWORD`. TheGamesDB jest włączany przez
+`THEGAMESDB_API_KEY`. OpenRetro i Libretro nie wymagają credentiali.
+
+Pipeline najpierw używa identyfikacji pliku (SHA-1 i MD5 w ScreenScraper),
+potem ścisłego dopasowania tytułu i platformy Amiga. Wszystkie źródła są
+sprawdzane, a brakujące pola są scalane. Sam URL obrazka nie kończy
+wyszukiwania: błąd HTTP, HTML zamiast obrazu albo uszkodzony plik powoduje
+przejście do następnego providera.
 
 Brak dopasowania albo brak obrazka u providera nie kończy się pustą grafiką:
 dla każdej zwykłej gry używany jest lokalny fallback `default-artwork` (w GUI
@@ -193,9 +208,10 @@ wyświetlany jako `Default artwork`)
 kopiowany obok NFO podczas eksportu. Demoscene ma osobny katalog miniaturek i
 zawsze pozostaje wyłączona z tego fallbacku.
 
-Jeżeli rekord cache zawiera metadata, ale nie ma artworku, kolejny build online
-ponawia wyszukiwanie providerów. Placeholder `default-artwork` nie blokuje już
-późniejszej próby pobrania prawdziwej grafiki.
+Jeżeli rekord cache zawiera wynik providera z metadata, ale bez artworku,
+kolejny build nie odpytuje ponownie providerów. Gry, dla których żaden provider
+nie znalazł dopasowania i zapisano jedynie `offline-filename`, mogą zostać
+sprawdzone ponownie w późniejszym buildzie.
 
 Rekordy gry zapisane przez starsze wersje z providerem `pouet` lub `demozoo`
 są traktowane jako nieaktualne: pipeline ponawia wyszukiwanie w providerach
@@ -207,27 +223,10 @@ podobnej nazwie. Katalog Pouët/Demozoo obsługuje osobne menu GUI oraz komendę
 `demoscene`; miniaturki są zapisywane wyłącznie w `assets\\demoscene\\`.
 Adres Pouët można zmienić przez `POUET_BASE_URL`.
 
-Minimalna odpowiedź gatewaya:
-
-~~~json
-{"results":[{"title":"Lotus Esprit Turbo Challenge","year":1990,
-  "publisher":"Gremlin","artwork_url":"https://host.example/lotus.jpg"}]}
-~~~
-
 OpenRetro wykonuje wyszukiwanie po tytule Amiga na `openretro.org`, pobiera
 kanoniczny opis, rok, wydawcę oraz okładkę (front image; gdy jej brak — pierwszy
-screen). Działa bez logowania. Hasheous używa lookupu po publicznym SHA-256 pierwszego dysku
-(`/Lookup/ByHash/sha256/{sha256}`), a Playmatch publicznego endpointu
-`/api/v1/identify/ids?sha256={sha256}`. Wikipedia jest tytułowym fallbackiem.
-Hall of Light (HOL) wykonuje wyszukiwanie gry w katalogu
-[amiga.abime.net/games/search](https://amiga.abime.net/games/search), a następnie
-odczytuje stronę pasującej wersji. Preferuje okładkę/front art, a gdy jej nie
-ma — screenshot; zapisuje stronę źródłową w `.source.json`. Jest to provider
-wyłącznie gier i nie pobiera rekordów demosceny. Publiczna witryna może zwrócić
-stronę ochrony antybotowej; w takim przypadku provider kończy się bez wyniku i
-pipeline przechodzi do następnego źródła (nie obchodzi CAPTCHA).
-Endpoint i ścieżkę wyszukiwania można zmienić dla testowego mirroru przez
-`HALL_OF_LIGHT_BASE_URL` i `HALL_OF_LIGHT_SEARCH_PATH` (placeholder `{title}`).
+screen). ScreenScraper oraz TheGamesDB korzystają z oficjalnych API, a Libretro
+dostarcza końcowego, bezkluczowego kandydata grafiki.
 Podstawowy transport żądań metadata nie podąża za redirectami, blokuje prywatne
 adresy i ogranicza rozmiar odpowiedzi. Po znalezieniu URL
 obrazka zapisuje go do `assets\artwork-original\<Release>.<ext>`, tworzy kopię
@@ -335,6 +334,11 @@ tytuły do katalogu demosceny i pobiera dostępne okładki. Metadane i miniaturk
 lokalnego cache'a aplikacji. Przed pobraniem lub eksportem trzeba wskazać
 `Export directory`. Oba przepływy tworzą układ gotowy dla GTi i zachowują
 kanoniczne nazwy TOSEC:
+
+Po wpisaniu tytułu w polu `Search` aplikacja przeszukuje też publiczne
+[archiwum scene.org](https://files.scene.org/browse/), w tym katalog party,
+i dodaje kandydatów ADF/DSK, ZIP oraz GZip. scene.org dostarcza linki do plików,
+ale nie metadane artworku.
 
 ~~~text
 <export-directory>\ADF\Demoscene\<Release>\<nazwa dysku TOSEC>.adf
@@ -458,8 +462,9 @@ Touch-LCD-7 oraz 320×240 — Waveshare ESP32-S3-Touch-LCD-2.8,
 zgodne z [Gotek Touchscreen interface](https://mesarim.github.io/Gotek-Touchscreen-interface/).
 Wynik pojawi się pod wybranym katalogiem docelowym jako
 `<destination>/<run-id>` (domyślnie `work/staging/<run-id>`). Zaznaczenie
-`Online metadata + artwork` uruchamia łańcuch publicznych providerów i pobieranie obrazków. Hasheous, Playmatch,
-OpenRetro, Hall of Light i Wikipedia są włączone automatycznie i nie wymagają kluczy. Lokalny
+`Online metadata + artwork` uruchamia nowy pipeline gier i pobieranie obrazków.
+OpenRetro i Libretro są dostępne automatycznie, a ScreenScraper i TheGamesDB po
+ustawieniu opisanych wyżej credentiali. Lokalny
 GameBase jest automatycznie używany, jeśli ustawiono `AMIGA_ADF_GAMEBASE_DB`;
 ścieżka nie jest już wybierana w GUI.
 Przy wyłączonym online UI używa cache/fallbacku offline i nie wykonuje żądań sieciowych.
@@ -523,8 +528,7 @@ Po opublikowaniu Release workflow uruchomi się raz i dołączy do niego assety.
 ## Aktualny zakres
 
 Gotowe są: offline/online Core, CLI, katalog, eksport z artworkiem, NFO, cache
-metadanych, publiczni providerzy Hasheous/Playmatch/OpenRetro/Hall-of-Light/Wikipedia,
-lokalny provider GameBase DB oraz providerzy
+metadanych, pipeline GameBase/ScreenScraper/OpenRetro/TheGamesDB/Libretro oraz providerzy
 Pouët/Demozoo dla demosceny,
 masowy downloader demosceny z deduplikacją, walidacja ścieżek, bezpieczny
 transport HTTP i wieloplatformowe GUI Avalonia.

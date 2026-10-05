@@ -1,11 +1,9 @@
-using System.Net;
-using System.Text.Json;
 using AmiGotekMediaBuilder.Core.Catalog;
 using AmiGotekMediaBuilder.Core.Models;
-using AmiGotekMediaBuilder.Core.Networking;
 
 namespace AmiGotekMediaBuilder.Core.Metadata;
 
+/// <summary>Shared endpoint options retained for the separate demoscene provider.</summary>
 public sealed record OnlineProviderOptions(
     string Id,
     string BaseUrl,
@@ -28,203 +26,64 @@ public sealed record OnlineEnrichmentProgress(
     string? Provider = null,
     string? Error = null);
 
-/// <summary>
-/// Configurable adapter for public JSON metadata gateways.
-/// </summary>
-public class JsonMetadataProvider(OnlineProviderOptions options, SafeHttpClient? client = null)
-    : IAsyncMetadataProvider, IDisposable
-{
-    private readonly SafeHttpClient _client = client ?? new SafeHttpClient();
-    private readonly bool _ownsClient = client is null;
-    public string Id => options.Id;
-
-    public virtual async Task<MetadataRecord?> ResolveAsync(ReleaseGroup group, CancellationToken cancellationToken = default)
-    {
-        var title = group.Title ?? "";
-        if (options.SearchPath.Contains("{sha256}", StringComparison.Ordinal) &&
-            string.IsNullOrWhiteSpace(group.SourceSha256))
-            return null;
-        var path = options.SearchPath.Replace("{title}", Uri.EscapeDataString(title), StringComparison.Ordinal)
-            .Replace("{release_key}", Uri.EscapeDataString(group.ReleaseKey), StringComparison.Ordinal)
-            .Replace("{sha256}", Uri.EscapeDataString(group.SourceSha256 ?? ""), StringComparison.Ordinal)
-            .Replace("{systemeid}", "23", StringComparison.Ordinal);
-
-        var url = new Uri(new Uri(options.BaseUrl.TrimEnd('/') + "/"), path.TrimStart('/')).ToString();
-        var bytes = await _client.GetBytesAsync(url, options.MaxResponseBytes, cancellationToken);
-        var result = ParseResponse(bytes, group, title);
-        return result is { ArtworkUrl: not null, ArtworkSourceUrl: null }
-            ? result with { ArtworkSourceUrl = RedactQuery(url) }
-            : result;
-    }
-
-    protected MetadataRecord? ParseResponse(byte[] bytes, ReleaseGroup group, string title)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(bytes);
-            if (IsExplicitMiss(document.RootElement)) return null;
-            var item = SelectBestItem(document.RootElement, title);
-            if (item.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
-            if (IsExplicitMiss(item)) return null;
-            var canonical = StringValue(item, "canonical_title", "title", "name", "game") ?? title;
-            var artworkUrl = ArtworkUrl(item) ?? ArtworkUrl(document.RootElement);
-            var sourceUrl = StringValue(item, "artwork_source_url", "source_url", "website", "url");
-            if (sourceUrl is not null) sourceUrl = RedactQuery(sourceUrl);
-            return CreateRecord(group, canonical,
-                YearValue(item),
-                StringValue(item, "publisher", "company", "developer"),
-                StringValue(item, "description", "summary", "plot"), artworkUrl, sourceUrl);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    public void Dispose() { if (_ownsClient) _client.Dispose(); }
-
-    private static JsonElement SelectBestItem(JsonElement root, string title)
-    {
-        if (root.ValueKind == JsonValueKind.Array)
-            return root.EnumerateArray().FirstOrDefault(x => x.ValueKind == JsonValueKind.Object);
-        foreach (var property in new[] { "results", "games", "data", "items" })
-            if (root.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Array)
-                return value.EnumerateArray().FirstOrDefault(x => x.ValueKind == JsonValueKind.Object);
-        foreach (var property in new[] { "result", "game", "data", "item" })
-            if (root.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Object)
-                return value;
-        return root;
-    }
-
-    private static bool IsExplicitMiss(JsonElement value) =>
-        value.ValueKind == JsonValueKind.Object &&
-        value.TryGetProperty("found", out var found) &&
-        found.ValueKind == JsonValueKind.False;
-
-    private static string? StringValue(JsonElement item, params string[] names)
-    {
-        foreach (var name in names)
-            if (item.TryGetProperty(name, out var value))
-                return value.ValueKind switch
-                {
-                    JsonValueKind.String => value.GetString(),
-                    JsonValueKind.Number => value.ToString(),
-                    _ => null
-                };
-        return null;
-    }
-
-    private static string? YearValue(JsonElement item)
-    {
-        if (!item.TryGetProperty("year", out _) && !item.TryGetProperty("release_year", out _) &&
-            !item.TryGetProperty("date", out _)) return null;
-        var raw = StringValue(item, "year", "release_year", "date");
-        if (long.TryParse(raw, out var number) && number > 100_000_000)
-        {
-            try { return DateTimeOffset.FromUnixTimeSeconds(number).Year.ToString(); }
-            catch (ArgumentOutOfRangeException) { }
-        }
-        return raw;
-    }
-
-    /// <summary>
-    /// Reads the common artwork shapes used by scraper gateways and provider
-    /// APIs (artwork_url/image_url, cover.url, images[], screenshots[]).
-    /// Values are normalized to absolute HTTPS/HTTP URLs. Invalid schemes are
-    /// ignored and therefore can never reach the downloader.
-    /// </summary>
-    private static string? ArtworkUrl(JsonElement item)
-    {
-        if (item.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
-        foreach (var name in new[]
-        {
-            "artwork_url", "image_url", "cover_url", "boxart_url", "thumbnail_url",
-            "artwork", "image", "cover", "boxart", "front_cover"
-        })
-        {
-            if (!item.TryGetProperty(name, out var value)) continue;
-            var candidate = UrlValue(value);
-            if (candidate is not null) return candidate;
-        }
-
-        foreach (var name in new[] { "artwork_urls", "images", "screenshots", "media", "assets" })
-        {
-            if (!item.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Array) continue;
-            foreach (var entry in value.EnumerateArray())
-            {
-                var candidate = UrlValue(entry);
-                if (candidate is not null) return candidate;
-            }
-        }
-        return null;
-    }
-
-    protected MetadataRecord CreateRecord(ReleaseGroup group, string title, string? year,
-        string? publisher, string? description, string? artworkUrl, string? sourceUrl) =>
-        new(group.ReleaseKey, title, year, publisher, description, Id, DateTimeOffset.UtcNow)
-        {
-            ArtworkUrl = artworkUrl,
-            ArtworkSourceUrl = sourceUrl,
-            ArtworkProvider = artworkUrl is null ? null : Id
-        };
-
-    private static string RedactQuery(string url)
-    {
-        var marker = url.IndexOf('?', StringComparison.Ordinal);
-        return marker >= 0 ? url[..marker] : url;
-    }
-
-    private static string? UrlValue(JsonElement value)
-    {
-        var raw = value.ValueKind switch
-        {
-            JsonValueKind.String => value.GetString(),
-            JsonValueKind.Object => StringValue(value, "url", "image_url", "src", "href", "path"),
-            _ => null
-        };
-        if (string.IsNullOrWhiteSpace(raw)) return null;
-        raw = raw.Trim();
-        if (raw.StartsWith("//", StringComparison.Ordinal)) raw = "https:" + raw;
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https") || string.IsNullOrWhiteSpace(uri.Host)) return null;
-
-        return raw;
-    }
-}
-
-public sealed class HasheousProvider(OnlineProviderOptions options, SafeHttpClient? client = null)
-    : JsonMetadataProvider(options with { Id = "hasheous" }, client);
-public sealed class PlaymatchProvider(OnlineProviderOptions options, SafeHttpClient? client = null)
-    : JsonMetadataProvider(options with { Id = "playmatch" }, client);
-
 public sealed class OnlineMetadataChain(IEnumerable<IAsyncMetadataProvider> providers)
 {
     public async Task<MetadataRecord?> ResolveAsync(
         ReleaseGroup group,
         CancellationToken cancellationToken = default,
         Action<string>? providerStarted = null,
-        Action<string, string>? providerFailed = null)
+        Action<string, string>? providerFailed = null,
+        Action<string, MetadataRecord?>? providerCompleted = null)
     {
-        MetadataRecord? firstMatch = null;
+        var results = await ResolveAllAsync(group, cancellationToken, providerStarted,
+            providerFailed, providerCompleted);
+        return Merge(results);
+    }
+
+    public async Task<IReadOnlyList<MetadataRecord>> ResolveAllAsync(
+        ReleaseGroup group,
+        CancellationToken cancellationToken = default,
+        Action<string>? providerStarted = null,
+        Action<string, string>? providerFailed = null,
+        Action<string, MetadataRecord?>? providerCompleted = null)
+    {
+        var matches = new List<MetadataRecord>();
         foreach (var provider in providers)
         {
             providerStarted?.Invoke(provider.Id);
             try
             {
                 var result = await provider.ResolveAsync(group, cancellationToken);
+                providerCompleted?.Invoke(provider.Id, result);
                 if (result is null) continue;
-                // Keep metadata precedence, but allow a later scraper to
-                // supply artwork when an earlier provider returned text only.
-                firstMatch ??= result;
-                if (!string.IsNullOrWhiteSpace(result.ArtworkUrl) ||
-                    !string.IsNullOrWhiteSpace(result.ArtworkPath)) return result;
+                matches.Add(result);
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 providerFailed?.Invoke(provider.Id, ex.GetBaseException().Message);
             }
         }
-        return firstMatch;
+        return matches;
+    }
+
+    internal static MetadataRecord? Merge(IEnumerable<MetadataRecord> records)
+    {
+        MetadataRecord? merged = null;
+        foreach (var candidate in records)
+        {
+            if (merged is null) { merged = candidate; continue; }
+            merged = merged with
+            {
+                Year = merged.Year ?? candidate.Year,
+                Publisher = merged.Publisher ?? candidate.Publisher,
+                Description = merged.Description ?? candidate.Description,
+                ArtworkUrl = merged.ArtworkUrl ?? candidate.ArtworkUrl,
+                ArtworkPath = merged.ArtworkPath ?? candidate.ArtworkPath,
+                ArtworkSourceUrl = merged.ArtworkSourceUrl ?? candidate.ArtworkSourceUrl,
+                ArtworkProvider = merged.ArtworkProvider ?? candidate.ArtworkProvider
+            };
+        }
+        return merged;
     }
 }
 
@@ -277,36 +136,39 @@ public sealed class HybridMetadataEnricher(
             var legacyAllowed = catalog is null || !HasSourceHash(group);
             var cachedCandidate = cached ??
                 (legacyAllowed && legacy is not null && !IsOfflineRecord(legacy) ? legacy : null);
-            // A metadata cache hit is not a completed artwork lookup. Retry
-            // providers for records without artwork, and for our own fallback,
-            // so a later online build can replace the placeholder with a real
-            // provider image.
+            // A successful provider record is a completed lookup even when no
+            // artwork was found. Keep it in the persistent catalog and do not
+            // scrape the same game again on every build. Offline filename
+            // fallbacks are excluded by ReadMetadata(includeOffline: false),
+            // so games that have never matched a provider can still be retried.
             var staleDemosceneCache = !group.IsDemoscene && cachedCandidate is not null &&
                                       IsDemosceneArtwork(cachedCandidate);
-            var cachedUsable = cachedCandidate is not null && !staleDemosceneCache &&
-                               !NeedsOnlineArtworkRefresh(cachedCandidate);
+            var staleRemovedProviderCache = !group.IsDemoscene && cachedCandidate is not null &&
+                                            IsRemovedGameProvider(cachedCandidate);
+            var staleProviderCache = staleDemosceneCache || staleRemovedProviderCache;
+            var cachedUsable = cachedCandidate is not null && !staleProviderCache &&
+                               HasUsableCachedArtworkReference(cachedCandidate);
             MetadataRecord? record = cachedUsable ? cachedCandidate : null;
+            IReadOnlyList<MetadataRecord> providerRecords = [];
             if (record is null)
             {
-                var refreshed = await chain.ResolveAsync(group, cancellationToken,
+                var providerOutcomes = new List<string>();
+                providerRecords = await chain.ResolveAllAsync(group, cancellationToken,
                     provider => progress?.Report(new(current, releaseGroups.Length,
                         group.ReleaseKey, title, "metadata", provider)),
-                    (provider, error) => progress?.Report(new(current, releaseGroups.Length,
-                        group.ReleaseKey, title, "provider-error", provider, error)));
-                if (!staleDemosceneCache && cachedCandidate is not null &&
-                    refreshed is not null && HasArtwork(refreshed))
+                    (provider, error) => providerOutcomes.Add($"{provider}: error ({ShortProviderError(error)})"),
+                    (provider, result) => providerOutcomes.Add(result is null
+                        ? $"{provider}: no match"
+                        : HasArtwork(result) ? $"{provider}: match + artwork" : $"{provider}: match, no artwork"));
+                var refreshed = OnlineMetadataChain.Merge(providerRecords);
+                if (providerOutcomes.Count > 0)
+                    progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
+                        "provider-summary", Error: string.Join("; ", providerOutcomes)));
+                if (!staleProviderCache && cachedCandidate is not null && refreshed is not null)
                 {
-                    // Keep the cached metadata precedence while accepting a
-                    // newly discovered provider image.
-                    record = cachedCandidate with
-                    {
-                        ArtworkUrl = refreshed.ArtworkUrl,
-                        ArtworkPath = refreshed.ArtworkPath,
-                        ArtworkSourceUrl = refreshed.ArtworkSourceUrl,
-                        ArtworkProvider = refreshed.ArtworkProvider
-                    };
+                    record = OnlineMetadataChain.Merge([cachedCandidate, refreshed]);
                 }
-                else if (staleDemosceneCache)
+                else if (staleProviderCache)
                 {
                     // A previous version allowed Pouët/Demozoo records into
                     // the game cache. Never carry that title/description into
@@ -334,25 +196,41 @@ public sealed class HybridMetadataEnricher(
             ArtworkArtifact? artifact = null;
             if (!group.IsDemoscene)
             {
-                try
+                var candidates = new List<MetadataRecord>();
+                if (cachedCandidate is not null && !staleProviderCache && HasArtwork(cachedCandidate))
+                    candidates.Add(cachedCandidate);
+                candidates.AddRange(providerRecords.Where(HasArtwork));
+                if (candidates.Count == 0 && HasArtwork(record)) candidates.Add(record);
+
+                foreach (var candidate in candidates
+                             .DistinctBy(item => item.ArtworkUrl ?? item.ArtworkPath,
+                                 StringComparer.OrdinalIgnoreCase))
                 {
-                    progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
-                        "artwork", record.ArtworkProvider ?? record.Provider));
-                    if (!string.IsNullOrWhiteSpace(record.ArtworkUrl) ||
-                             !string.IsNullOrWhiteSpace(record.ArtworkPath))
+                    try
                     {
+                        progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
+                            "artwork", candidate.ArtworkProvider ?? candidate.Provider));
                         artifact = await artwork.DownloadAsync(
-                            record, group, artworkOriginalDirectory,
+                            candidate, group, artworkOriginalDirectory,
                             artworkProcessedDirectory, cancellationToken);
-                        if (artifact is not null) ArtworkDownloaded++;
+                        if (artifact is null) continue;
+                        ArtworkDownloaded++;
+                        record = record with
+                        {
+                            ArtworkUrl = candidate.ArtworkUrl,
+                            ArtworkPath = artifact.ProcessedPath,
+                            ArtworkSourceUrl = candidate.ArtworkSourceUrl,
+                            ArtworkProvider = candidate.ArtworkProvider ?? candidate.Provider
+                        };
+                        break;
                     }
-                }
-                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-                {
-                    ArtworkFailed++;
-                    progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
-                        "artwork-error", record.ArtworkProvider ?? record.Provider,
-                        ex.GetBaseException().Message));
+                    catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        ArtworkFailed++;
+                        progress?.Report(new(current, releaseGroups.Length, group.ReleaseKey, title,
+                            "artwork-error", candidate.ArtworkProvider ?? candidate.Provider,
+                            ex.GetBaseException().Message));
+                    }
                 }
 
                 // Do not create an artwork-cache fallback when providers miss.
@@ -360,9 +238,8 @@ public sealed class HybridMetadataEnricher(
                 // subsequent online runs retry artwork discovery.
                 if (artifact is null)
                 {
-                    record = record with { ArtworkPath = null, ArtworkSourceUrl = null,
-                        ArtworkProvider = string.Equals(record.ArtworkProvider, DefaultArtworkService.ProviderId,
-                            StringComparison.OrdinalIgnoreCase) ? null : record.ArtworkProvider };
+                    record = record with { ArtworkUrl = null, ArtworkPath = null,
+                        ArtworkSourceUrl = null, ArtworkProvider = null };
                 }
             }
 
@@ -390,16 +267,34 @@ public sealed class HybridMetadataEnricher(
     private static bool IsOfflineRecord(MetadataRecord record) =>
         string.Equals(record.Provider, "offline-filename", StringComparison.OrdinalIgnoreCase);
 
-    private static bool NeedsOnlineArtworkRefresh(MetadataRecord record) =>
-        string.Equals(record.ArtworkProvider, DefaultArtworkService.ProviderId,
-            StringComparison.OrdinalIgnoreCase) ||
-        (!string.IsNullOrWhiteSpace(record.ArtworkPath) && !File.Exists(record.ArtworkPath)) ||
-        (string.IsNullOrWhiteSpace(record.ArtworkUrl) &&
-         string.IsNullOrWhiteSpace(record.ArtworkPath));
+    private static bool IsRemovedGameProvider(MetadataRecord record) =>
+        IsRemovedGameProvider(record.Provider) || IsRemovedGameProvider(record.ArtworkProvider);
+
+    private static bool IsRemovedGameProvider(string? provider) => provider is not null &&
+        (provider.Equals("hasheous", StringComparison.OrdinalIgnoreCase) ||
+         provider.Equals("playmatch", StringComparison.OrdinalIgnoreCase) ||
+         provider.Equals("hall-of-light", StringComparison.OrdinalIgnoreCase) ||
+         provider.Equals("wikipedia", StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasUsableCachedArtworkReference(MetadataRecord record)
+    {
+        // Metadata-only results are valid cache entries. A missing local image
+        // is stale only when there is no saved URL from which it can be restored.
+        if (string.IsNullOrWhiteSpace(record.ArtworkPath)) return true;
+        return File.Exists(record.ArtworkPath) || !string.IsNullOrWhiteSpace(record.ArtworkUrl);
+    }
 
     private static bool HasArtwork(MetadataRecord record) =>
         !string.IsNullOrWhiteSpace(record.ArtworkUrl) ||
         !string.IsNullOrWhiteSpace(record.ArtworkPath);
+
+    private static string ShortProviderError(string error)
+    {
+        var marker = error.IndexOf("Response status code does not indicate success:", StringComparison.OrdinalIgnoreCase);
+        if (marker < 0) return error;
+        var status = error[(marker + "Response status code does not indicate success:".Length)..].Trim();
+        return status.Length > 80 ? status[..80] : status;
+    }
 
     private static bool HasSourceHash(ReleaseGroup group) =>
         group.SourceSha256 is { Length: > 0 } ||
